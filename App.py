@@ -84,15 +84,23 @@ conn   = conectar()
 cursor = conn.cursor()
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS pedidos (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    cliente_nome   TEXT NOT NULL,
-    produto_nome   TEXT NOT NULL,
-    quantidade     INTEGER NOT NULL,
-    valor_unitario REAL NOT NULL,
-    valor_total    REAL NOT NULL
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    cliente_nome     TEXT NOT NULL,
+    produto_nome     TEXT NOT NULL,
+    quantidade       INTEGER NOT NULL,
+    valor_unitario   REAL NOT NULL,
+    valor_total      REAL NOT NULL,
+    forma_pagamento  TEXT NOT NULL DEFAULT 'agora',
+    pago             INTEGER NOT NULL DEFAULT 1
 )
 """)
-conn.commit()
+# Migração: adiciona colunas se não existirem (banco já existente)
+for col, default in [("forma_pagamento", "'agora'"), ("pago", "1")]:
+    try:
+        cursor.execute(f"ALTER TABLE pedidos ADD COLUMN {col} TEXT NOT NULL DEFAULT {default}")
+        conn.commit()
+    except Exception:
+        pass
 
 import pandas as pd
 
@@ -107,23 +115,33 @@ def limpar_pedidos():
     cursor.execute("DELETE FROM pedidos")
     conn.commit()
 
-def salvar_pedido(nome, itens):
+def marcar_pago(pedido_id):
+    cursor.execute("UPDATE pedidos SET pago = 1 WHERE id = ?", (pedido_id,))
+    conn.commit()
+
+def marcar_pago_cliente(cliente_nome):
+    cursor.execute("UPDATE pedidos SET pago = 1 WHERE cliente_nome = ? AND pago = 0", (cliente_nome,))
+    conn.commit()
+
+def salvar_pedido(nome, itens, forma_pagamento):
+    pago = 1 if forma_pagamento == "agora" else 0
     for item in itens:
         total = item["quantidade"] * item["preco"]
         cursor.execute("""
-            INSERT INTO pedidos (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total)
-            VALUES (?, ?, ?, ?, ?)
-        """, (nome, item["nome"], item["quantidade"], item["preco"], total))
+            INSERT INTO pedidos (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total, forma_pagamento, pago)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (nome, item["nome"], item["quantidade"], item["preco"], total, forma_pagamento, pago))
     conn.commit()
 
-def gerar_whatsapp(nome, itens):
-    linhas = [f"Olá! Gostaria de fazer um pedido.", f"Nome: {nome}", ""]
+def gerar_whatsapp(nome, itens, forma_pagamento="agora"):
+    pagamento_txt = "Pagamento na hora" if forma_pagamento == "agora" else "Pagar depois (proximo mes)"
+    linhas = [f"Ola! Gostaria de fazer um pedido.", f"Nome: {nome}", f"Pagamento: {pagamento_txt}", ""]
     total_geral = 0
     for item in itens:
         subtotal = item["quantidade"] * item["preco"]
         total_geral += subtotal
-        linhas.append(f"• {item['nome']} x{item['quantidade']} — {brl(subtotal)}")
-    linhas += ["", f"*Total: {brl(total_geral)}*"]
+        linhas.append(f"- {item['nome']} x{item['quantidade']} - {brl(subtotal)}")
+    linhas += ["", f"Total: {brl(total_geral)}"]
     texto = "\n".join(linhas)
     return f"https://wa.me/{WHATSAPP_NUMERO}?text={quote(texto)}"
 
@@ -502,12 +520,20 @@ with st.sidebar:
 
         nome = st.text_input("Seu nome", placeholder="Digite seu nome completo")
 
+        forma = st.radio(
+            "Forma de pagamento",
+            ["Pagar agora", "Pagar depois"],
+            horizontal=True,
+            key="forma_pagamento"
+        )
+        forma_val = "agora" if forma == "Pagar agora" else "depois"
+
         if st.button("Confirmar pedido", type="primary", use_container_width=True):
             if not nome.strip():
                 st.warning("Por favor, informe seu nome.")
             else:
-                salvar_pedido(nome, st.session_state.carrinho)
-                st.session_state.whatsapp_link = gerar_whatsapp(nome, st.session_state.carrinho)
+                salvar_pedido(nome, st.session_state.carrinho, forma_val)
+                st.session_state.whatsapp_link = gerar_whatsapp(nome, st.session_state.carrinho, forma_val)
                 st.session_state.carrinho = []
                 st.session_state.pedido_enviado = True
                 st.rerun()
@@ -672,47 +698,104 @@ elif pagina == "Admin":
         if df.empty:
             st.info("Nenhum pedido registrado ainda.")
         else:
-            # TOP PRODUTOS E CLIENTES
-            col_tp, col_tc = st.columns(2)
+            aba_visao, aba_cobranca, aba_pedidos = st.tabs(["Visao Geral", "Cobrar Clientes", "Todos os Pedidos"])
 
-            with col_tp:
-                st.subheader("Top Produtos")
-                top_prod = (
-                    df.groupby("produto_nome", as_index=False)["quantidade"]
-                    .sum().sort_values("quantidade", ascending=False).head(5)
-                )
-                top_prod.columns = ["Produto", "Qtd Vendida"]
-                st.dataframe(top_prod, use_container_width=True, hide_index=True)
+            # ── ABA 1: VISÃO GERAL ──
+            with aba_visao:
+                col_tp, col_tc = st.columns(2)
+                with col_tp:
+                    st.subheader("Top Produtos")
+                    top_prod = (
+                        df.groupby("produto_nome", as_index=False)["quantidade"]
+                        .sum().sort_values("quantidade", ascending=False).head(5)
+                    )
+                    top_prod.columns = ["Produto", "Qtd Vendida"]
+                    st.dataframe(top_prod, use_container_width=True, hide_index=True)
+                with col_tc:
+                    st.subheader("Top Clientes")
+                    top_cli = (
+                        df.groupby("cliente_nome", as_index=False)["valor_total"]
+                        .sum().sort_values("valor_total", ascending=False).head(5)
+                    )
+                    top_cli["valor_total"] = top_cli["valor_total"].apply(brl)
+                    top_cli.columns = ["Cliente", "Total Gasto"]
+                    st.dataframe(top_cli, use_container_width=True, hide_index=True)
 
-            with col_tc:
-                st.subheader("Top Clientes")
-                top_cli = (
-                    df.groupby("cliente_nome", as_index=False)["valor_total"]
-                    .sum().sort_values("valor_total", ascending=False).head(5)
-                )
-                top_cli["valor_total"] = top_cli["valor_total"].apply(brl)
-                top_cli.columns = ["Cliente", "Total Gasto"]
-                st.dataframe(top_cli, use_container_width=True, hide_index=True)
+            # ── ABA 2: COBRANÇAS POR CLIENTE ──
+            with aba_cobranca:
+                df_pagar = df[df["pago"] == 0] if "pago" in df.columns else pd.DataFrame()
 
-            st.divider()
+                if df_pagar.empty:
+                    st.success("Nenhum valor pendente. Todos os clientes estao em dia!")
+                else:
+                    total_pendente = df_pagar["valor_total"].sum()
+                    st.markdown(f"""
+                    <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;
+                    padding:16px 20px;margin-bottom:20px;">
+                        <div style="font-size:0.8rem;color:#9a3412;font-weight:600;text-transform:uppercase;">
+                            Total a receber
+                        </div>
+                        <div style="font-size:1.8rem;font-weight:800;color:#9a3412;">{brl(total_pendente)}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-            # LISTA DE PEDIDOS
-            col_ped, col_limpar = st.columns([4, 1])
-            with col_ped:
-                st.subheader("Todos os Pedidos")
-            with col_limpar:
-                if st.button("Limpar tudo", use_container_width=True):
-                    limpar_pedidos()
-                    st.success("Todos os pedidos removidos.")
-                    st.rerun()
+                    clientes_pendentes = df_pagar["cliente_nome"].unique()
+                    cliente_sel = st.selectbox("Filtrar por cliente", ["Todos"] + sorted(clientes_pendentes.tolist()))
 
-            for _, row in df.iterrows():
-                col1, col2, col3, col4, col5, col6 = st.columns([2, 2.5, 0.8, 1.2, 1.2, 1])
-                col1.write(row["cliente_nome"])
-                col2.write(row["produto_nome"])
-                col3.write(int(row["quantidade"]))
-                col4.write(brl(row["valor_unitario"]))
-                col5.write(brl(row["valor_total"]))
-                if col6.button("Excluir", key=f"del_{row['id']}"):
-                    deletar_pedido(int(row["id"]))
-                    st.rerun()
+                    df_filtrado = df_pagar if cliente_sel == "Todos" else df_pagar[df_pagar["cliente_nome"] == cliente_sel]
+
+                    for cliente in (clientes_pendentes if cliente_sel == "Todos" else [cliente_sel]):
+                        pedidos_cli = df_filtrado[df_filtrado["cliente_nome"] == cliente]
+                        total_cli = pedidos_cli["valor_total"].sum()
+
+                        col_cli, col_btn_pago = st.columns([4, 1])
+                        with col_cli:
+                            st.markdown(f"""
+                            <div style="background:white;border:1px solid #e2e8f0;border-left:5px solid #f59e0b;
+                            border-radius:12px;padding:14px 18px;margin-bottom:4px;">
+                                <div style="font-weight:700;font-size:1rem;color:#0f172a;">{cliente}</div>
+                                <div style="color:#64748b;font-size:0.85rem;margin-top:4px;">
+                                    {len(pedidos_cli)} item(ns) pendente(s)
+                                </div>
+                                <div style="font-weight:800;font-size:1.1rem;color:#d97706;margin-top:6px;">
+                                    A receber: {brl(total_cli)}
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        with col_btn_pago:
+                            st.markdown("<div style='margin-top:18px;'></div>", unsafe_allow_html=True)
+                            if st.button("Marcar pago", key=f"pago_{cliente}", use_container_width=True, type="primary"):
+                                marcar_pago_cliente(cliente)
+                                st.success(f"{cliente} marcado como pago!")
+                                st.rerun()
+
+                        with st.expander(f"Ver itens de {cliente}"):
+                            for _, row in pedidos_cli.iterrows():
+                                st.markdown(f"- **{row['produto_nome']}** x{int(row['quantidade'])} — {brl(row['valor_total'])}")
+
+            # ── ABA 3: TODOS OS PEDIDOS ──
+            with aba_pedidos:
+                col_ped, col_limpar = st.columns([4, 1])
+                with col_ped:
+                    st.subheader("Todos os Pedidos")
+                with col_limpar:
+                    if st.button("Limpar tudo", use_container_width=True):
+                        limpar_pedidos()
+                        st.success("Todos os pedidos removidos.")
+                        st.rerun()
+
+                for _, row in df.iterrows():
+                    pago_col = int(row["pago"]) if "pago" in row else 1
+                    forma_col = row.get("forma_pagamento", "agora")
+                    status_cor  = "#22c55e" if pago_col else "#f59e0b"
+                    status_txt  = "Pago" if pago_col else "Pendente"
+                    col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 2.2, 0.7, 1.1, 1.1, 0.9, 0.9])
+                    col1.write(row["cliente_nome"])
+                    col2.write(row["produto_nome"])
+                    col3.write(int(row["quantidade"]))
+                    col4.write(brl(row["valor_unitario"]))
+                    col5.write(brl(row["valor_total"]))
+                    col6.markdown(f'<span style="color:{status_cor};font-weight:700;">{status_txt}</span>', unsafe_allow_html=True)
+                    if col7.button("Excluir", key=f"del_{row['id']}"):
+                        deletar_pedido(int(row["id"]))
+                        st.rerun()
