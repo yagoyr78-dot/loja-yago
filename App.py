@@ -799,31 +799,33 @@ elif pagina == "Admin":
 
         st.divider()
 
-        if df.empty:
-            st.info("Nenhum pedido registrado ainda.")
-        else:
-            aba_visao, aba_cobranca, aba_estoque, aba_pedidos = st.tabs(["Visao Geral", "Cobrar Clientes", "Estoque", "Todos os Pedidos"])
+        aba_visao, aba_cobranca, aba_estoque, aba_pedidos = st.tabs(["Visao Geral", "Cobrar Clientes", "Estoque", "Todos os Pedidos"])
+
+        if True:
 
             # ── ABA 1: VISÃO GERAL ──
             with aba_visao:
-                col_tp, col_tc = st.columns(2)
-                with col_tp:
-                    st.subheader("Top Produtos")
-                    top_prod = (
-                        df.groupby("produto_nome", as_index=False)["quantidade"]
-                        .sum().sort_values("quantidade", ascending=False).head(5)
-                    )
-                    top_prod.columns = ["Produto", "Qtd Vendida"]
-                    st.dataframe(top_prod, use_container_width=True, hide_index=True)
-                with col_tc:
-                    st.subheader("Top Clientes")
-                    top_cli = (
-                        df.groupby("cliente_nome", as_index=False)["valor_total"]
-                        .sum().sort_values("valor_total", ascending=False).head(5)
-                    )
-                    top_cli["valor_total"] = top_cli["valor_total"].apply(brl)
-                    top_cli.columns = ["Cliente", "Total Gasto"]
-                    st.dataframe(top_cli, use_container_width=True, hide_index=True)
+                if df.empty:
+                    st.info("Nenhum pedido registrado ainda.")
+                else:
+                    col_tp, col_tc = st.columns(2)
+                    with col_tp:
+                        st.subheader("Top Produtos")
+                        top_prod = (
+                            df.groupby("produto_nome", as_index=False)["quantidade"]
+                            .sum().sort_values("quantidade", ascending=False).head(5)
+                        )
+                        top_prod.columns = ["Produto", "Qtd Vendida"]
+                        st.dataframe(top_prod, use_container_width=True, hide_index=True)
+                    with col_tc:
+                        st.subheader("Top Clientes")
+                        top_cli = (
+                            df.groupby("cliente_nome", as_index=False)["valor_total"]
+                            .sum().sort_values("valor_total", ascending=False).head(5)
+                        )
+                        top_cli["valor_total"] = top_cli["valor_total"].apply(brl)
+                        top_cli.columns = ["Cliente", "Total Gasto"]
+                        st.dataframe(top_cli, use_container_width=True, hide_index=True)
 
             # ── ABA 2: COBRANÇAS POR CLIENTE ──
             with aba_cobranca:
@@ -913,14 +915,17 @@ elif pagina == "Admin":
 
             # ── ABA 4: TODOS OS PEDIDOS ──
             with aba_pedidos:
-                col_ped, col_limpar = st.columns([4, 1])
-                with col_ped:
-                    st.subheader("Todos os Pedidos")
-                with col_limpar:
-                    if st.button("Limpar tudo", use_container_width=True):
-                        limpar_pedidos()
-                        st.success("Todos os pedidos removidos.")
-                        st.rerun()
+                if df.empty:
+                    st.info("Nenhum pedido registrado ainda.")
+                else:
+                    col_ped, col_limpar = st.columns([4, 1])
+                    with col_ped:
+                        st.subheader("Todos os Pedidos")
+                    with col_limpar:
+                        if st.button("Limpar tudo", use_container_width=True):
+                            limpar_pedidos()
+                            st.success("Todos os pedidos removidos.")
+                            st.rerun()
 
                 for _, row in df.iterrows():
                     pago_col = int(row["pago"]) if "pago" in row else 1
