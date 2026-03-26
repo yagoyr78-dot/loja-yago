@@ -143,9 +143,9 @@ CREATE TABLE IF NOT EXISTS pedidos (
 )
 """)
 # Migração: adiciona colunas se não existirem (banco já existente)
-for col, default in [("forma_pagamento", "'agora'"), ("pago", "1"), ("custo_unitario", "0"), ("data_venda", "datetime('now','localtime')")]:
+for col, default in [("forma_pagamento", "'agora'"), ("pago", "1"), ("custo_unitario", "0"), ("data_venda", "''")]:
     try:
-        cursor.execute(f"ALTER TABLE pedidos ADD COLUMN {col} TEXT NOT NULL DEFAULT {default}")
+        cursor.execute(f"ALTER TABLE pedidos ADD COLUMN {col} TEXT DEFAULT {default}")
         conn.commit()
     except Exception:
         pass
