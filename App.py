@@ -148,6 +148,27 @@ for col, default in [("forma_pagamento", "'agora'"), ("pago", "1")]:
     except Exception:
         pass
 
+# TABELA DE ESTOQUE
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS estoque (
+    produto_id   INTEGER PRIMARY KEY,
+    produto_nome TEXT NOT NULL,
+    quantidade   INTEGER NOT NULL DEFAULT 0
+)
+""")
+conn.commit()
+
+# Estoque inicial — só insere se a tabela estiver vazia
+cursor.execute("SELECT COUNT(*) FROM estoque")
+if cursor.fetchone()[0] == 0:
+    estoques_iniciais = [
+        (1, "Cappuccino 260 ml",  11),
+        (2, "Barra de Proteína",  19),
+        (4, "Iogurte Proteico",    3),
+    ]
+    cursor.executemany("INSERT INTO estoque (produto_id, produto_nome, quantidade) VALUES (?, ?, ?)", estoques_iniciais)
+    conn.commit()
+
 import pandas as pd
 
 def carregar_vendas():
@@ -169,6 +190,17 @@ def marcar_pago_cliente(cliente_nome):
     cursor.execute("UPDATE pedidos SET pago = 1 WHERE cliente_nome = ? AND pago = 0", (cliente_nome,))
     conn.commit()
 
+def carregar_estoque():
+    return {row[0]: row[1] for row in cursor.execute("SELECT produto_id, quantidade FROM estoque").fetchall()}
+
+def atualizar_estoque(produto_id, delta):
+    cursor.execute("UPDATE estoque SET quantidade = MAX(0, quantidade + ?) WHERE produto_id = ?", (delta, produto_id))
+    conn.commit()
+
+def definir_estoque(produto_id, quantidade):
+    cursor.execute("UPDATE estoque SET quantidade = ? WHERE produto_id = ?", (quantidade, produto_id))
+    conn.commit()
+
 def salvar_pedido(nome, itens, forma_pagamento):
     pago = 1 if forma_pagamento == "agora" else 0
     for item in itens:
@@ -177,6 +209,7 @@ def salvar_pedido(nome, itens, forma_pagamento):
             INSERT INTO pedidos (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total, forma_pagamento, pago)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (nome, item["nome"], item["quantidade"], item["preco"], total, forma_pagamento, pago))
+        atualizar_estoque(item["id"], -item["quantidade"])
     conn.commit()
 
 def gerar_whatsapp(nome, itens, forma_pagamento="agora"):
@@ -645,17 +678,34 @@ if pagina == "Produtos":
     st.markdown('<div class="section-sub">Escolha os produtos e adicione ao carrinho</div>', unsafe_allow_html=True)
 
     cols = st.columns(2, gap="large")
+    estoque_atual = carregar_estoque()
 
     for i, p in enumerate(PRODUTOS):
         with cols[i % 2]:
             img_b64 = img_base64(p["imagem"])
             img_html = f'<img src="data:image/png;base64,{img_b64}" />' if img_b64 else '<div style="color:#94a3b8;font-size:2rem;">Sem imagem</div>'
 
+            tem_estoque = p["id"] not in estoque_atual  # sem controle = ilimitado (cappuccino em pó)
+            qtd_estoque = estoque_atual.get(p["id"], None)
+            sem_estoque = qtd_estoque is not None and qtd_estoque == 0
+
+            if sem_estoque:
+                estoque_badge = '<span style="background:#fee2e2;color:#dc2626;font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:50px;">Esgotado</span>'
+            elif qtd_estoque is not None and qtd_estoque <= 3:
+                estoque_badge = f'<span style="background:#fff7ed;color:#d97706;font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:50px;">Últimas {qtd_estoque} unidades</span>'
+            elif qtd_estoque is not None:
+                estoque_badge = f'<span style="background:#f0fdf4;color:#16a34a;font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:50px;">Em estoque: {qtd_estoque}</span>'
+            else:
+                estoque_badge = ""
+
             st.markdown(f"""
             <div class="produto-card">
                 <div class="produto-img-wrap">{img_html}</div>
                 <div class="produto-body">
-                    <div class="produto-tag">{p['tag']}</div>
+                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                        <div class="produto-tag">{p['tag']}</div>
+                        {estoque_badge}
+                    </div>
                     <div class="produto-nome">{p['nome']}</div>
                     <div class="produto-desc">{p['descricao']}</div>
                     <div class="produto-preco">{brl(p['preco'])}</div>
@@ -665,12 +715,16 @@ if pagina == "Produtos":
 
             col_qtd, col_btn = st.columns([1, 2])
             with col_qtd:
-                qtd = st.number_input("Qtd", min_value=1, step=1, value=1, key=f"qtd_{p['id']}", label_visibility="collapsed")
+                max_qtd = qtd_estoque if qtd_estoque is not None else 99
+                qtd = st.number_input("Qtd", min_value=1, max_value=max(1, max_qtd), step=1, value=1, key=f"qtd_{p['id']}", label_visibility="collapsed", disabled=sem_estoque)
             with col_btn:
-                if st.button("Adicionar ao carrinho", key=f"btn_{p['id']}", use_container_width=True, type="primary"):
-                    adicionar(p, int(qtd))
-                    st.success(f"{p['nome']} adicionado!")
-                    st.rerun()
+                if sem_estoque:
+                    st.button("Esgotado", key=f"btn_{p['id']}", use_container_width=True, disabled=True)
+                else:
+                    if st.button("Adicionar ao carrinho", key=f"btn_{p['id']}", use_container_width=True, type="primary"):
+                        adicionar(p, int(qtd))
+                        st.success(f"{p['nome']} adicionado!")
+                        st.rerun()
 
 
 # =========================
@@ -759,7 +813,7 @@ elif pagina == "Admin":
         if df.empty:
             st.info("Nenhum pedido registrado ainda.")
         else:
-            aba_visao, aba_cobranca, aba_pedidos = st.tabs(["Visao Geral", "Cobrar Clientes", "Todos os Pedidos"])
+            aba_visao, aba_cobranca, aba_estoque, aba_pedidos = st.tabs(["Visao Geral", "Cobrar Clientes", "Estoque", "Todos os Pedidos"])
 
             # ── ABA 1: VISÃO GERAL ──
             with aba_visao:
@@ -834,7 +888,41 @@ elif pagina == "Admin":
                             for _, row in pedidos_cli.iterrows():
                                 st.markdown(f"- **{row['produto_nome']}** x{int(row['quantidade'])} — {brl(row['valor_total'])}")
 
-            # ── ABA 3: TODOS OS PEDIDOS ──
+            # ── ABA 3: ESTOQUE ──
+            with aba_estoque:
+                st.subheader("Controle de Estoque")
+                estoque_db = carregar_estoque()
+                produtos_com_estoque = [p for p in PRODUTOS if p["id"] in estoque_db]
+
+                for p in produtos_com_estoque:
+                    qtd_atual = estoque_db.get(p["id"], 0)
+                    if qtd_atual == 0:
+                        cor, label = "#fee2e2", "Esgotado"
+                    elif qtd_atual <= 3:
+                        cor, label = "#fff7ed", f"{qtd_atual} unidades"
+                    else:
+                        cor, label = "#f0fdf4", f"{qtd_atual} unidades"
+
+                    col_nome, col_qtd, col_btn = st.columns([3, 1.5, 1.5])
+                    with col_nome:
+                        st.markdown(f"""
+                        <div style="background:{cor};border-radius:10px;padding:10px 14px;margin-bottom:4px;">
+                            <div style="font-weight:700;color:#0f172a;">{p['nome']}</div>
+                            <div style="font-size:0.85rem;color:#64748b;">Estoque atual: <b>{label}</b></div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    with col_qtd:
+                        nova_qtd = st.number_input("Nova qtd", min_value=0, step=1, value=qtd_atual, key=f"est_{p['id']}", label_visibility="collapsed")
+                    with col_btn:
+                        st.markdown("<div style='margin-top:4px;'></div>", unsafe_allow_html=True)
+                        if st.button("Atualizar", key=f"upd_est_{p['id']}", use_container_width=True):
+                            definir_estoque(p["id"], int(nova_qtd))
+                            st.success(f"{p['nome']}: {nova_qtd} un.")
+                            st.rerun()
+
+                st.info("Cappuccino em Po nao tem controle de estoque (vendido por dose).")
+
+            # ── ABA 4: TODOS OS PEDIDOS ──
             with aba_pedidos:
                 col_ped, col_limpar = st.columns([4, 1])
                 with col_ped:
