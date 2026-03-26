@@ -685,29 +685,22 @@ if pagina == "Produtos":
             qtd_estoque = estoque_atual.get(p["id"], None)
             sem_estoque = qtd_estoque is not None and qtd_estoque == 0
 
-            if sem_estoque:
-                estoque_badge = '<span style="background:#fee2e2;color:#dc2626;font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:50px;">Esgotado</span>'
-            elif qtd_estoque is not None and qtd_estoque <= 3:
-                estoque_badge = f'<span style="background:#fff7ed;color:#d97706;font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:50px;">Últimas {qtd_estoque} unidades</span>'
-            elif qtd_estoque is not None:
-                estoque_badge = f'<span style="background:#f0fdf4;color:#16a34a;font-size:0.72rem;font-weight:700;padding:3px 10px;border-radius:50px;">Em estoque: {qtd_estoque}</span>'
-            else:
-                estoque_badge = ""
-
             with st.container(border=True):
-                if os.path.exists(p["imagem"]):
-                    st.image(p["imagem"], use_container_width=True)
-                st.markdown(f"""
-                <div style="padding:4px 0;">
-                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
-                        <span class="produto-tag">{p['tag']}</span>
-                        {estoque_badge}
-                    </div>
-                    <div class="produto-nome">{p['nome']}</div>
-                    <div class="produto-desc">{p['descricao']}</div>
-                    <div class="produto-preco">{brl(p['preco'])}</div>
-                </div>
-                """, unsafe_allow_html=True)
+                col_img, col_info = st.columns([1, 1.4])
+                with col_img:
+                    if os.path.exists(p["imagem"]):
+                        st.image(p["imagem"], width=180)
+                with col_info:
+                    st.caption(p["tag"])
+                    st.subheader(p["nome"], divider=False)
+                    st.caption(p["descricao"])
+                    st.markdown(f"**{brl(p['preco'])}**")
+                    if sem_estoque:
+                        st.error("Esgotado", icon="🚫")
+                    elif qtd_estoque is not None and qtd_estoque <= 3:
+                        st.warning(f"Últimas {qtd_estoque} unidades")
+                    elif qtd_estoque is not None:
+                        st.success(f"Em estoque: {qtd_estoque}")
 
                 col_qtd, col_btn = st.columns([1, 2])
                 with col_qtd:
