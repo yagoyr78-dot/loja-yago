@@ -137,13 +137,15 @@ CREATE TABLE IF NOT EXISTS pedidos (
     valor_unitario   REAL NOT NULL,
     valor_total      REAL NOT NULL,
     forma_pagamento  TEXT NOT NULL DEFAULT 'agora',
-    pago             INTEGER NOT NULL DEFAULT 1
+    pago             INTEGER NOT NULL DEFAULT 1,
+    custo_unitario   REAL NOT NULL DEFAULT 0,
+    data_venda       TEXT DEFAULT (datetime('now','localtime'))
 )
 """)
 # Migração: adiciona colunas se não existirem (banco já existente)
-for col, default in [("forma_pagamento", "'agora'"), ("pago", "1"), ("custo_unitario", "0")]:
+for col, default in [("forma_pagamento", "'agora'"), ("pago", "1"), ("custo_unitario", "0"), ("data_venda", "datetime('now','localtime')")]:
     try:
-        cursor.execute(f"ALTER TABLE pedidos ADD COLUMN {col} REAL NOT NULL DEFAULT {default}")
+        cursor.execute(f"ALTER TABLE pedidos ADD COLUMN {col} TEXT NOT NULL DEFAULT {default}")
         conn.commit()
     except Exception:
         pass
@@ -232,15 +234,17 @@ def definir_estoque(produto_id, quantidade):
     conn.commit()
 
 def salvar_pedido(nome, itens, forma_pagamento):
+    from datetime import datetime
     pago = 1 if forma_pagamento == "agora" else 0
     custos_db = carregar_custos()
+    data_agora = datetime.now().strftime("%d/%m/%Y %H:%M")
     for item in itens:
         total = item["quantidade"] * item["preco"]
         custo_unit = custos_db.get(item["id"], 0)
         cursor.execute("""
-            INSERT INTO pedidos (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total, forma_pagamento, pago, custo_unitario)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (nome, item["nome"], item["quantidade"], item["preco"], total, forma_pagamento, pago, custo_unit))
+            INSERT INTO pedidos (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total, forma_pagamento, pago, custo_unitario, data_venda)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (nome, item["nome"], item["quantidade"], item["preco"], total, forma_pagamento, pago, custo_unit, data_agora))
         atualizar_estoque(item["id"], -item["quantidade"])
     conn.commit()
 
@@ -818,15 +822,17 @@ elif pagina == "Admin":
         df = carregar_vendas()
 
         # MÉTRICAS
-        faturamento    = df["valor_total"].sum() if not df.empty else 0
+        df_pagos       = df[df["pago"] == 1] if not df.empty and "pago" in df.columns else df
+        faturamento    = df_pagos["valor_total"].sum() if not df_pagos.empty else 0
+        a_receber_top  = df[df["pago"] == 0]["valor_total"].sum() if not df.empty and "pago" in df.columns else 0
         itens_vendidos = int(df["quantidade"].sum()) if not df.empty else 0
         num_clientes   = int(df["cliente_nome"].nunique()) if not df.empty else 0
         num_pedidos    = len(df) if not df.empty else 0
 
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Faturamento Total", brl(faturamento))
-        c2.metric("Itens Vendidos",    itens_vendidos)
-        c3.metric("Clientes",          num_clientes)
+        c1.metric("Receita (pago)", brl(faturamento))
+        c2.metric("A Receber",      brl(a_receber_top))
+        c3.metric("Clientes",       num_clientes)
         c4.metric("Pedidos",           num_pedidos)
 
         st.divider()
@@ -864,16 +870,76 @@ elif pagina == "Admin":
                 if df.empty:
                     st.info("Nenhum pedido registrado ainda.")
                 else:
-                    receita = df["valor_total"].sum()
-                    custo_total = (df["custo_unitario"] * df["quantidade"]).sum() if "custo_unitario" in df.columns else 0
-                    lucro = receita - custo_total
-                    margem = (lucro / receita * 100) if receita > 0 else 0
+                    df_pago   = df[df["pago"] == 1]
+                    df_pendente = df[df["pago"] == 0]
 
+                    receita       = df_pago["valor_total"].sum()
+                    custo_total   = (df_pago["custo_unitario"] * df_pago["quantidade"]).sum() if "custo_unitario" in df_pago.columns and not df_pago.empty else 0
+                    lucro         = receita - custo_total
+                    margem        = (lucro / receita * 100) if receita > 0 else 0
+                    a_receber     = df_pendente["valor_total"].sum()
+                    lucro_label   = "Lucro" if lucro >= 0 else "Prejuizo"
+                    cor_lucro     = "#22c55e" if lucro >= 0 else "#ef4444"
+
+                    # ── Cards de métricas ──
                     cf1, cf2, cf3, cf4 = st.columns(4)
-                    cf1.metric("Receita Total", brl(receita))
-                    cf2.metric("Custo Total", brl(custo_total))
-                    cf3.metric("Lucro", brl(lucro))
-                    cf4.metric("Margem", f"{margem:.1f}%")
+                    cf1.metric("Receita (pago)", brl(receita))
+                    cf2.metric("Gastos", brl(custo_total))
+                    cf3.metric(lucro_label, brl(abs(lucro)), delta=f"{margem:.1f}% margem", delta_color="normal" if lucro >= 0 else "inverse")
+                    cf4.metric("A Receber", brl(a_receber))
+
+                    st.divider()
+
+                    # ── Gráfico visual de barras ──
+                    st.subheader("Resumo Financeiro")
+                    barras = [
+                        ("Receita",    receita,     "#22c55e"),
+                        ("Gastos",     custo_total, "#f59e0b"),
+                        (lucro_label,  abs(lucro),  cor_lucro),
+                        ("A Receber",  a_receber,   "#3b82f6"),
+                    ]
+                    max_val = max(v for _, v, _ in barras) or 1
+                    for label, valor, cor in barras:
+                        pct = valor / max_val * 100
+                        st.markdown(f"""
+                        <div style="margin-bottom:14px;">
+                            <div style="display:flex;justify-content:space-between;margin-bottom:5px;">
+                                <span style="font-weight:700;color:#0f172a;font-size:0.95rem;">{label}</span>
+                                <span style="font-weight:800;color:{cor};font-size:0.95rem;">{brl(valor)}</span>
+                            </div>
+                            <div style="background:#e2e8f0;border-radius:8px;height:24px;overflow:hidden;">
+                                <div style="width:{pct:.1f}%;background:{cor};height:100%;border-radius:8px;"></div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    st.divider()
+
+                    # ── Margem por produto ──
+                    st.subheader("Margem por Produto")
+                    custos_db_fin = carregar_custos()
+                    for p in PRODUTOS:
+                        if p["id"] not in custos_db_fin:
+                            continue
+                        custo_p   = custos_db_fin[p["id"]]
+                        margem_p  = p["preco"] - custo_p
+                        mpct      = (margem_p / p["preco"] * 100) if p["preco"] > 0 else 0
+                        cor_m     = "#22c55e" if margem_p >= 0 else "#ef4444"
+                        pct_bar   = max(0, min(100, mpct))
+                        st.markdown(f"""
+                        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 16px;margin-bottom:10px;">
+                            <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+                                <span style="font-weight:700;color:#0f172a;">{p['nome']}</span>
+                                <span style="color:#64748b;font-size:0.88rem;">
+                                    Venda <b>{brl(p['preco'])}</b> &nbsp;|&nbsp; Custo <b>{brl(custo_p)}</b> &nbsp;|&nbsp;
+                                    <span style="color:{cor_m};font-weight:700;">Margem {brl(margem_p)} ({mpct:.0f}%)</span>
+                                </span>
+                            </div>
+                            <div style="background:#e2e8f0;border-radius:6px;height:8px;overflow:hidden;">
+                                <div style="width:{pct_bar:.1f}%;background:{cor_m};height:100%;border-radius:6px;"></div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
 
             # ── ABA 3: COBRANÇAS POR CLIENTE ──
@@ -991,23 +1057,25 @@ elif pagina == "Admin":
                     pago_col   = int(row["pago"]) if "pago" in row else 1
                     status_cor = "#22c55e" if pago_col else "#f59e0b"
                     status_txt = "Pago" if pago_col else "Pendente"
-                    col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 2.2, 0.7, 1.1, 1.2, 0.9, 0.9])
+                    data_txt   = str(row["data_venda"])[:16] if "data_venda" in row and row["data_venda"] else "—"
+                    col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1.6, 2, 0.6, 1.0, 1.4, 1.1, 0.9, 0.9])
                     col1.write(row["cliente_nome"])
                     col2.write(row["produto_nome"])
                     col3.write(int(row["quantidade"]))
                     col4.write(brl(row["valor_unitario"]))
-                    novo_total = col5.number_input(
+                    col5.caption(data_txt)
+                    novo_total = col6.number_input(
                         "Valor", min_value=0.0, step=0.01,
                         value=float(row["valor_total"]),
                         key=f"edit_val_{row['id']}",
                         label_visibility="collapsed", format="%.2f"
                     )
                     if novo_total != float(row["valor_total"]):
-                        if col6.button("Salvar", key=f"save_{row['id']}", type="primary"):
+                        if col7.button("Salvar", key=f"save_{row['id']}", type="primary"):
                             editar_venda(int(row["id"]), novo_total)
                             st.rerun()
                     else:
-                        col6.markdown(f'<span style="color:{status_cor};font-weight:700;">{status_txt}</span>', unsafe_allow_html=True)
-                    if col7.button("Excluir", key=f"del_{row['id']}"):
+                        col7.markdown(f'<span style="color:{status_cor};font-weight:700;">{status_txt}</span>', unsafe_allow_html=True)
+                    if col8.button("Excluir", key=f"del_{row['id']}"):
                         deletar_pedido(int(row["id"]))
                         st.rerun()
