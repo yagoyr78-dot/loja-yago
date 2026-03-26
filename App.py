@@ -2,8 +2,11 @@ import os
 import sqlite3
 from urllib.parse import quote
 import base64
+import io
 
 import streamlit as st
+import qrcode
+from PIL import Image
 
 # =========================
 # CONFIG
@@ -17,6 +20,9 @@ WHATSAPP_NUMERO  = "5565993157477"
 EMAIL_CONTATO    = "Yagoyr78@gmail.com"
 TELEFONE_CONTATO = "(65) 99315-7477"
 ADMIN_SENHA      = "loja2025"
+PIX_CHAVE        = "00339221100"
+PIX_NOME         = "Yago"
+PIX_CIDADE       = "Cuiaba"
 
 
 # =========================
@@ -27,6 +33,46 @@ def caminho_imagem(nome):
 
 def brl(v):
     return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def gerar_pix_payload(chave, nome, cidade, valor):
+    def crc16(data):
+        crc = 0xFFFF
+        for byte in data.encode("utf-8"):
+            crc ^= byte << 8
+            for _ in range(8):
+                crc = ((crc << 1) ^ 0x1021) if crc & 0x8000 else crc << 1
+                crc &= 0xFFFF
+        return crc
+
+    def f(id, v):
+        return f"{id}{len(v):02d}{v}"
+
+    gui = f("00", "br.gov.bcb.pix") + f("01", chave)
+    valor_str = f"{valor:.2f}"
+    payload = (
+        f("00", "01") +
+        f("26", gui) +
+        f("52", "0000") +
+        f("53", "986") +
+        f("54", valor_str) +
+        f("58", "BR") +
+        f("59", nome[:25]) +
+        f("60", cidade[:15]) +
+        f("62", f("05", "***"))
+        + "6304"
+    )
+    return payload + f"{crc16(payload):04X}"
+
+def gerar_qrcode_pix(valor):
+    payload = gerar_pix_payload(PIX_CHAVE, PIX_NOME, PIX_CIDADE, valor)
+    qr = qrcode.QRCode(box_size=6, border=2)
+    qr.add_data(payload)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
 
 def img_base64(path):
     if os.path.exists(path):
@@ -527,6 +573,21 @@ with st.sidebar:
             key="forma_pagamento"
         )
         forma_val = "agora" if forma == "Pagar agora" else "depois"
+
+        if forma_val == "agora":
+            st.markdown(f"""
+            <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:12px;
+            padding:14px;margin:10px 0;text-align:center;">
+                <div style="font-size:0.75rem;font-weight:700;color:#166534;text-transform:uppercase;
+                letter-spacing:0.5px;margin-bottom:6px;">Chave PIX</div>
+                <div style="font-size:1rem;font-weight:800;color:#15803d;
+                background:white;border-radius:8px;padding:8px;letter-spacing:1px;">
+                    {PIX_CHAVE}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            qr_buf = gerar_qrcode_pix(total_carrinho())
+            st.image(qr_buf, caption=f"QR Code PIX — {brl(total_carrinho())}", use_container_width=True)
 
         if st.button("Confirmar pedido", type="primary", use_container_width=True):
             if not nome.strip():
