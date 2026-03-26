@@ -16,6 +16,7 @@ DB_PATH  = os.path.join(BASE_DIR, "loja.db")
 WHATSAPP_NUMERO  = "5565993157477"
 EMAIL_CONTATO    = "Yagoyr78@gmail.com"
 TELEFONE_CONTATO = "(65) 99315-7477"
+ADMIN_SENHA      = "loja2025"
 
 
 # =========================
@@ -93,6 +94,19 @@ CREATE TABLE IF NOT EXISTS pedidos (
 """)
 conn.commit()
 
+import pandas as pd
+
+def carregar_vendas():
+    return pd.read_sql_query("SELECT * FROM pedidos ORDER BY id DESC", conn)
+
+def deletar_pedido(pedido_id):
+    cursor.execute("DELETE FROM pedidos WHERE id = ?", (pedido_id,))
+    conn.commit()
+
+def limpar_pedidos():
+    cursor.execute("DELETE FROM pedidos")
+    conn.commit()
+
 def salvar_pedido(nome, itens):
     for item in itens:
         total = item["quantidade"] * item["preco"]
@@ -123,6 +137,8 @@ if "whatsapp_link" not in st.session_state:
     st.session_state.whatsapp_link = None
 if "pedido_enviado" not in st.session_state:
     st.session_state.pedido_enviado = False
+if "admin_logado" not in st.session_state:
+    st.session_state.admin_logado = False
 
 def adicionar(produto, qtd):
     for item in st.session_state.carrinho:
@@ -522,7 +538,7 @@ with st.sidebar:
 # =========================
 # MENU
 # =========================
-pagina = st.radio("", ["Produtos", "Contato"], horizontal=True)
+pagina = st.radio("", ["Produtos", "Contato", "Admin"], horizontal=True)
 
 
 # =========================
@@ -608,3 +624,95 @@ elif pagina == "Contato":
         Falar no WhatsApp
     </a>
     """, unsafe_allow_html=True)
+
+
+# =========================
+# PÁGINA ADMIN
+# =========================
+elif pagina == "Admin":
+
+    if not st.session_state.admin_logado:
+        st.markdown('<div class="section-title">Acesso Restrito</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-sub">Insira a senha para acessar o painel administrativo</div>', unsafe_allow_html=True)
+
+        col_login, _ = st.columns([1, 2])
+        with col_login:
+            senha = st.text_input("Senha", type="password", placeholder="Digite a senha")
+            if st.button("Entrar", type="primary", use_container_width=True):
+                if senha == ADMIN_SENHA:
+                    st.session_state.admin_logado = True
+                    st.rerun()
+                else:
+                    st.error("Senha incorreta.")
+    else:
+        col_titulo, col_sair = st.columns([4, 1])
+        with col_titulo:
+            st.markdown('<div class="section-title">Painel Administrativo</div>', unsafe_allow_html=True)
+        with col_sair:
+            if st.button("Sair", use_container_width=True):
+                st.session_state.admin_logado = False
+                st.rerun()
+
+        df = carregar_vendas()
+
+        # MÉTRICAS
+        faturamento    = df["valor_total"].sum() if not df.empty else 0
+        itens_vendidos = int(df["quantidade"].sum()) if not df.empty else 0
+        num_clientes   = int(df["cliente_nome"].nunique()) if not df.empty else 0
+        num_pedidos    = len(df) if not df.empty else 0
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Faturamento Total", brl(faturamento))
+        c2.metric("Itens Vendidos",    itens_vendidos)
+        c3.metric("Clientes",          num_clientes)
+        c4.metric("Pedidos",           num_pedidos)
+
+        st.divider()
+
+        if df.empty:
+            st.info("Nenhum pedido registrado ainda.")
+        else:
+            # TOP PRODUTOS E CLIENTES
+            col_tp, col_tc = st.columns(2)
+
+            with col_tp:
+                st.subheader("Top Produtos")
+                top_prod = (
+                    df.groupby("produto_nome", as_index=False)["quantidade"]
+                    .sum().sort_values("quantidade", ascending=False).head(5)
+                )
+                top_prod.columns = ["Produto", "Qtd Vendida"]
+                st.dataframe(top_prod, use_container_width=True, hide_index=True)
+
+            with col_tc:
+                st.subheader("Top Clientes")
+                top_cli = (
+                    df.groupby("cliente_nome", as_index=False)["valor_total"]
+                    .sum().sort_values("valor_total", ascending=False).head(5)
+                )
+                top_cli["valor_total"] = top_cli["valor_total"].apply(brl)
+                top_cli.columns = ["Cliente", "Total Gasto"]
+                st.dataframe(top_cli, use_container_width=True, hide_index=True)
+
+            st.divider()
+
+            # LISTA DE PEDIDOS
+            col_ped, col_limpar = st.columns([4, 1])
+            with col_ped:
+                st.subheader("Todos os Pedidos")
+            with col_limpar:
+                if st.button("Limpar tudo", use_container_width=True):
+                    limpar_pedidos()
+                    st.success("Todos os pedidos removidos.")
+                    st.rerun()
+
+            for _, row in df.iterrows():
+                col1, col2, col3, col4, col5, col6 = st.columns([2, 2.5, 0.8, 1.2, 1.2, 1])
+                col1.write(row["cliente_nome"])
+                col2.write(row["produto_nome"])
+                col3.write(int(row["quantidade"]))
+                col4.write(brl(row["valor_unitario"]))
+                col5.write(brl(row["valor_total"]))
+                if col6.button("Excluir", key=f"del_{row['id']}"):
+                    deletar_pedido(int(row["id"]))
+                    st.rerun()
