@@ -682,10 +682,6 @@ if pagina == "Produtos":
 
     for i, p in enumerate(PRODUTOS):
         with cols[i % 2]:
-            img_b64 = img_base64(p["imagem"])
-            img_html = f'<img src="data:image/png;base64,{img_b64}" />' if img_b64 else '<div style="color:#94a3b8;font-size:2rem;">Sem imagem</div>'
-
-            tem_estoque = p["id"] not in estoque_atual  # sem controle = ilimitado (cappuccino em pó)
             qtd_estoque = estoque_atual.get(p["id"], None)
             sem_estoque = qtd_estoque is not None and qtd_estoque == 0
 
@@ -698,33 +694,33 @@ if pagina == "Produtos":
             else:
                 estoque_badge = ""
 
-            st.markdown(f"""
-            <div class="produto-card">
-                <div class="produto-img-wrap">{img_html}</div>
-                <div class="produto-body">
-                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
-                        <div class="produto-tag">{p['tag']}</div>
+            with st.container(border=True):
+                if os.path.exists(p["imagem"]):
+                    st.image(p["imagem"], use_container_width=True)
+                st.markdown(f"""
+                <div style="padding:4px 0;">
+                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+                        <span class="produto-tag">{p['tag']}</span>
                         {estoque_badge}
                     </div>
                     <div class="produto-nome">{p['nome']}</div>
                     <div class="produto-desc">{p['descricao']}</div>
                     <div class="produto-preco">{brl(p['preco'])}</div>
                 </div>
-            </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
 
-            col_qtd, col_btn = st.columns([1, 2])
-            with col_qtd:
-                max_qtd = qtd_estoque if qtd_estoque is not None else 99
-                qtd = st.number_input("Qtd", min_value=1, max_value=max(1, max_qtd), step=1, value=1, key=f"qtd_{p['id']}", label_visibility="collapsed", disabled=sem_estoque)
-            with col_btn:
-                if sem_estoque:
-                    st.button("Esgotado", key=f"btn_{p['id']}", use_container_width=True, disabled=True)
-                else:
-                    if st.button("Adicionar ao carrinho", key=f"btn_{p['id']}", use_container_width=True, type="primary"):
-                        adicionar(p, int(qtd))
-                        st.success(f"{p['nome']} adicionado!")
-                        st.rerun()
+                col_qtd, col_btn = st.columns([1, 2])
+                with col_qtd:
+                    max_qtd = qtd_estoque if qtd_estoque is not None else 99
+                    qtd = st.number_input("Qtd", min_value=1, max_value=max(1, max_qtd), step=1, value=1, key=f"qtd_{p['id']}", label_visibility="collapsed", disabled=sem_estoque)
+                with col_btn:
+                    if sem_estoque:
+                        st.button("Esgotado", key=f"btn_{p['id']}", use_container_width=True, disabled=True)
+                    else:
+                        if st.button("Adicionar ao carrinho", key=f"btn_{p['id']}", use_container_width=True, type="primary"):
+                            adicionar(p, int(qtd))
+                            st.success(f"{p['nome']} adicionado!")
+                            st.rerun()
 
 
 # =========================
