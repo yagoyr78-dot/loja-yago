@@ -175,7 +175,7 @@ st.markdown("""
     background-color: #f8f9fa;
 }
 .block-container {
-    padding-top: 0 !important;
+    padding-top: 3.5rem !important;
     padding-bottom: 2rem;
     max-width: 1200px;
 }
