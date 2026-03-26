@@ -193,7 +193,15 @@ if cursor.fetchone()[0] == 0:
 import pandas as pd
 
 def carregar_vendas():
-    return pd.read_sql_query("SELECT * FROM pedidos ORDER BY id DESC", conn)
+    df = pd.read_sql_query("SELECT * FROM pedidos ORDER BY id DESC", conn)
+    if not df.empty:
+        # Garante tipos corretos independente de como a coluna foi criada (TEXT vs INTEGER)
+        df["pago"]           = pd.to_numeric(df["pago"],           errors="coerce").fillna(1).astype(int)
+        df["quantidade"]     = pd.to_numeric(df["quantidade"],     errors="coerce").fillna(0).astype(int)
+        df["valor_total"]    = pd.to_numeric(df["valor_total"],    errors="coerce").fillna(0.0).astype(float)
+        df["valor_unitario"] = pd.to_numeric(df["valor_unitario"], errors="coerce").fillna(0.0).astype(float)
+        df["custo_unitario"] = pd.to_numeric(df["custo_unitario"], errors="coerce").fillna(0.0).astype(float)
+    return df
 
 def deletar_pedido(pedido_id):
     cursor.execute("DELETE FROM pedidos WHERE id = ?", (pedido_id,))
@@ -204,11 +212,12 @@ def limpar_pedidos():
     conn.commit()
 
 def marcar_pago(pedido_id):
-    cursor.execute("UPDATE pedidos SET pago = 1 WHERE id = ?", (pedido_id,))
+    cursor.execute("UPDATE pedidos SET pago = 1 WHERE id = ?", (int(pedido_id),))
     conn.commit()
 
 def marcar_pago_cliente(cliente_nome):
-    cursor.execute("UPDATE pedidos SET pago = 1 WHERE cliente_nome = ? AND pago = 0", (cliente_nome,))
+    # Usa CAST para comparar corretamente mesmo se pago estiver salvo como TEXT
+    cursor.execute("UPDATE pedidos SET pago = 1 WHERE cliente_nome = ? AND CAST(pago AS INTEGER) = 0", (cliente_nome,))
     conn.commit()
 
 def carregar_custos():
@@ -236,16 +245,25 @@ def definir_estoque(produto_id, quantidade):
 def salvar_pedido(nome, itens, forma_pagamento):
     from datetime import datetime
     pago = 1 if forma_pagamento == "agora" else 0
-    custos_db = carregar_custos()
+    custos_db  = carregar_custos()
+    estoque_db = carregar_estoque()
     data_agora = datetime.now().strftime("%d/%m/%Y %H:%M")
     for item in itens:
-        total = item["quantidade"] * item["preco"]
-        custo_unit = custos_db.get(item["id"], 0)
+        total      = item["quantidade"] * item["preco"]
+        custo_unit = custos_db.get(item["id"], 0.0)
         cursor.execute("""
-            INSERT INTO pedidos (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total, forma_pagamento, pago, custo_unitario, data_venda)
+            INSERT INTO pedidos
+                (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total,
+                 forma_pagamento, pago, custo_unitario, data_venda)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (nome, item["nome"], item["quantidade"], item["preco"], total, forma_pagamento, pago, custo_unit, data_agora))
-        atualizar_estoque(item["id"], -item["quantidade"])
+        """, (nome, item["nome"], int(item["quantidade"]), float(item["preco"]),
+              float(total), forma_pagamento, int(pago), float(custo_unit), data_agora))
+        # Abate estoque apenas para produtos com controle de estoque
+        if item["id"] in estoque_db:
+            cursor.execute(
+                "UPDATE estoque SET quantidade = MAX(0, quantidade - ?) WHERE produto_id = ?",
+                (int(item["quantidade"]), int(item["id"]))
+            )
     conn.commit()
 
 def gerar_whatsapp(nome, itens, forma_pagamento="agora"):
@@ -662,11 +680,20 @@ with st.sidebar:
             if not nome.strip():
                 st.warning("Por favor, informe seu nome.")
             else:
-                salvar_pedido(nome, st.session_state.carrinho, forma_val)
-                st.session_state.whatsapp_link = gerar_whatsapp(nome, st.session_state.carrinho, forma_val)
-                st.session_state.carrinho = []
-                st.session_state.pedido_enviado = True
-                st.rerun()
+                estoque_atual_check = carregar_estoque()
+                sem_estoque = []
+                for item in st.session_state.carrinho:
+                    qtd_disp = estoque_atual_check.get(item["id"], None)
+                    if qtd_disp is not None and item["quantidade"] > qtd_disp:
+                        sem_estoque.append(f"{item['nome']} (disponível: {qtd_disp})")
+                if sem_estoque:
+                    st.error("Estoque insuficiente: " + ", ".join(sem_estoque))
+                else:
+                    salvar_pedido(nome, st.session_state.carrinho, forma_val)
+                    st.session_state.whatsapp_link = gerar_whatsapp(nome, st.session_state.carrinho, forma_val)
+                    st.session_state.carrinho = []
+                    st.session_state.pedido_enviado = True
+                    st.rerun()
 
         if st.session_state.pedido_enviado and st.session_state.whatsapp_link:
             st.success("Pedido confirmado!")
@@ -944,55 +971,55 @@ elif pagina == "Admin":
 
             # ── ABA 3: COBRANÇAS POR CLIENTE ──
             with aba_cobranca:
-                df_pagar = df[df["pago"] == 0] if "pago" in df.columns else pd.DataFrame()
+                df_pagar = df[df["pago"] == 0].copy() if "pago" in df.columns else pd.DataFrame()
 
                 if df_pagar.empty:
                     st.success("Nenhum valor pendente. Todos os clientes estao em dia!")
                 else:
                     total_pendente = df_pagar["valor_total"].sum()
-                    st.markdown(f"""
-                    <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;
-                    padding:16px 20px;margin-bottom:20px;">
-                        <div style="font-size:0.8rem;color:#9a3412;font-weight:600;text-transform:uppercase;">
-                            Total a receber
-                        </div>
-                        <div style="font-size:1.8rem;font-weight:800;color:#9a3412;">{brl(total_pendente)}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    num_pendente   = df_pagar["cliente_nome"].nunique()
+                    cp1, cp2 = st.columns(2)
+                    cp1.metric("Total a receber", brl(total_pendente))
+                    cp2.metric("Clientes devedores", num_pendente)
+                    st.divider()
 
-                    clientes_pendentes = df_pagar["cliente_nome"].unique()
-                    cliente_sel = st.selectbox("Filtrar por cliente", ["Todos"] + sorted(clientes_pendentes.tolist()))
+                    clientes_pendentes = sorted(df_pagar["cliente_nome"].unique().tolist())
 
-                    df_filtrado = df_pagar if cliente_sel == "Todos" else df_pagar[df_pagar["cliente_nome"] == cliente_sel]
+                    for cliente in clientes_pendentes:
+                        pedidos_cli = df_pagar[df_pagar["cliente_nome"] == cliente]
+                        total_cli   = pedidos_cli["valor_total"].sum()
 
-                    for cliente in (clientes_pendentes if cliente_sel == "Todos" else [cliente_sel]):
-                        pedidos_cli = df_filtrado[df_filtrado["cliente_nome"] == cliente]
-                        total_cli = pedidos_cli["valor_total"].sum()
+                        # Lista de itens com data
+                        itens_html = ""
+                        for _, row in pedidos_cli.iterrows():
+                            data_p = str(row["data_venda"])[:16] if "data_venda" in row and row["data_venda"] else "—"
+                            itens_html += f"""
+                            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f1f5f9;">
+                                <span style="color:#374151;">{row['produto_nome']} <b>x{int(row['quantidade'])}</b></span>
+                                <span style="color:#6b7280;font-size:0.82rem;">{data_p}</span>
+                                <span style="font-weight:700;color:#0f172a;">{brl(row['valor_total'])}</span>
+                            </div>"""
 
                         col_cli, col_btn_pago = st.columns([4, 1])
                         with col_cli:
                             st.markdown(f"""
                             <div style="background:white;border:1px solid #e2e8f0;border-left:5px solid #f59e0b;
-                            border-radius:12px;padding:14px 18px;margin-bottom:4px;">
-                                <div style="font-weight:700;font-size:1rem;color:#0f172a;">{cliente}</div>
-                                <div style="color:#64748b;font-size:0.85rem;margin-top:4px;">
-                                    {len(pedidos_cli)} item(ns) pendente(s)
+                            border-radius:12px;padding:16px 18px;margin-bottom:8px;">
+                                <div style="font-weight:800;font-size:1rem;color:#0f172a;margin-bottom:8px;">
+                                    {cliente}
                                 </div>
-                                <div style="font-weight:800;font-size:1.1rem;color:#d97706;margin-top:6px;">
-                                    A receber: {brl(total_cli)}
+                                {itens_html}
+                                <div style="font-weight:800;font-size:1.1rem;color:#d97706;margin-top:10px;">
+                                    Total a receber: {brl(total_cli)}
                                 </div>
                             </div>
                             """, unsafe_allow_html=True)
                         with col_btn_pago:
-                            st.markdown("<div style='margin-top:18px;'></div>", unsafe_allow_html=True)
+                            st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
                             if st.button("Marcar pago", key=f"pago_{cliente}", use_container_width=True, type="primary"):
                                 marcar_pago_cliente(cliente)
                                 st.success(f"{cliente} marcado como pago!")
                                 st.rerun()
-
-                        with st.expander(f"Ver itens de {cliente}"):
-                            for _, row in pedidos_cli.iterrows():
-                                st.markdown(f"- **{row['produto_nome']}** x{int(row['quantidade'])} — {brl(row['valor_total'])}")
 
             # ── ABA 3: ESTOQUE ──
             with aba_estoque:
