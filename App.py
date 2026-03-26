@@ -875,23 +875,6 @@ elif pagina == "Admin":
                     cf3.metric("Lucro", brl(lucro))
                     cf4.metric("Margem", f"{margem:.1f}%")
 
-                    st.divider()
-                    st.subheader("Custo por Produto")
-                    st.caption("Atualize o custo unitario de compra de cada produto")
-                    custos_db = carregar_custos()
-                    produtos_com_custo = [p for p in PRODUTOS if p["id"] in custos_db]
-                    for p in produtos_com_custo:
-                        custo_atual = custos_db.get(p["id"], 0)
-                        cc1, cc2, cc3 = st.columns([3, 1.5, 1.5])
-                        with cc1:
-                            st.markdown(f"**{p['nome']}** — Venda: {brl(p['preco'])} | Custo atual: {brl(custo_atual)} | Margem: {brl(p['preco'] - custo_atual)}")
-                        with cc2:
-                            novo_custo = st.number_input("Custo", min_value=0.0, step=0.01, value=float(custo_atual), key=f"custo_{p['id']}", label_visibility="collapsed", format="%.2f")
-                        with cc3:
-                            if st.button("Atualizar custo", key=f"upd_custo_{p['id']}", use_container_width=True):
-                                definir_custo(p["id"], float(novo_custo))
-                                st.success("Custo atualizado!")
-                                st.rerun()
 
             # ── ABA 3: COBRANÇAS POR CLIENTE ──
             with aba_cobranca:
@@ -949,32 +932,43 @@ elif pagina == "Admin":
             with aba_estoque:
                 st.subheader("Controle de Estoque")
                 estoque_db = carregar_estoque()
+                custos_db = carregar_custos()
                 produtos_com_estoque = [p for p in PRODUTOS if p["id"] in estoque_db]
+
+                st.caption("Qtd = unidades em estoque | Custo = valor pago por unidade na ultima compra")
+                col_h1, col_h2, col_h3, col_h4 = st.columns([2.5, 1.2, 1.2, 1.5])
+                col_h1.markdown("**Produto**")
+                col_h2.markdown("**Qtd**")
+                col_h3.markdown("**Custo (R$)**")
 
                 for p in produtos_com_estoque:
                     qtd_atual = estoque_db.get(p["id"], 0)
+                    custo_atual = custos_db.get(p["id"], 0.0)
                     if qtd_atual == 0:
                         cor, label = "#fee2e2", "Esgotado"
                     elif qtd_atual <= 3:
-                        cor, label = "#fff7ed", f"{qtd_atual} unidades"
+                        cor, label = "#fff7ed", f"{qtd_atual} un."
                     else:
-                        cor, label = "#f0fdf4", f"{qtd_atual} unidades"
+                        cor, label = "#f0fdf4", f"{qtd_atual} un."
 
-                    col_nome, col_qtd, col_btn = st.columns([3, 1.5, 1.5])
+                    col_nome, col_qtd, col_custo, col_btn = st.columns([2.5, 1.2, 1.2, 1.5])
                     with col_nome:
                         st.markdown(f"""
                         <div style="background:{cor};border-radius:10px;padding:10px 14px;margin-bottom:4px;">
                             <div style="font-weight:700;color:#0f172a;">{p['nome']}</div>
-                            <div style="font-size:0.85rem;color:#64748b;">Estoque atual: <b>{label}</b></div>
+                            <div style="font-size:0.82rem;color:#64748b;">Estoque: <b>{label}</b> | Custo: <b>{brl(custo_atual)}</b></div>
                         </div>
                         """, unsafe_allow_html=True)
                     with col_qtd:
-                        nova_qtd = st.number_input("Nova qtd", min_value=0, step=1, value=qtd_atual, key=f"est_{p['id']}", label_visibility="collapsed")
+                        nova_qtd = st.number_input("Qtd", min_value=0, step=1, value=qtd_atual, key=f"est_{p['id']}", label_visibility="collapsed")
+                    with col_custo:
+                        novo_custo = st.number_input("Custo", min_value=0.0, step=0.01, value=float(custo_atual), key=f"custo_{p['id']}", label_visibility="collapsed", format="%.2f")
                     with col_btn:
                         st.markdown("<div style='margin-top:4px;'></div>", unsafe_allow_html=True)
                         if st.button("Atualizar", key=f"upd_est_{p['id']}", use_container_width=True):
                             definir_estoque(p["id"], int(nova_qtd))
-                            st.success(f"{p['nome']}: {nova_qtd} un.")
+                            definir_custo(p["id"], float(novo_custo))
+                            st.success(f"{p['nome']} atualizado!")
                             st.rerun()
 
                 st.info("Cappuccino em Po nao tem controle de estoque (vendido por dose).")
