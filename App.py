@@ -16,13 +16,13 @@ st.set_page_config(page_title="Loja Yago", layout="wide", page_icon="🛒")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(BASE_DIR, "loja.db")
 
-WHATSAPP_NUMERO  = "5565993157477"
-EMAIL_CONTATO    = "Yagoyr78@gmail.com"
-TELEFONE_CONTATO = "(65) 99315-7477"
-ADMIN_SENHA      = "loja2025"
-PIX_CHAVE        = "00339221100"
-PIX_NOME         = "Yago"
-PIX_CIDADE       = "Cuiaba"
+WHATSAPP_NUMERO  = st.secrets["WHATSAPP_NUMERO"]
+EMAIL_CONTATO    = st.secrets["EMAIL_CONTATO"]
+TELEFONE_CONTATO = st.secrets["TELEFONE_CONTATO"]
+ADMIN_SENHA      = st.secrets["ADMIN_SENHA"]
+PIX_CHAVE        = st.secrets["PIX_CHAVE"]
+PIX_NOME         = st.secrets["PIX_NOME"]
+PIX_CIDADE       = st.secrets["PIX_CIDADE"]
 
 
 # =========================
