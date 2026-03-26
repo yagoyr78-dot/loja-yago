@@ -141,12 +141,31 @@ CREATE TABLE IF NOT EXISTS pedidos (
 )
 """)
 # Migração: adiciona colunas se não existirem (banco já existente)
-for col, default in [("forma_pagamento", "'agora'"), ("pago", "1")]:
+for col, default in [("forma_pagamento", "'agora'"), ("pago", "1"), ("custo_unitario", "0")]:
     try:
-        cursor.execute(f"ALTER TABLE pedidos ADD COLUMN {col} TEXT NOT NULL DEFAULT {default}")
+        cursor.execute(f"ALTER TABLE pedidos ADD COLUMN {col} REAL NOT NULL DEFAULT {default}")
         conn.commit()
     except Exception:
         pass
+
+# TABELA DE CUSTOS
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS custos (
+    produto_id   INTEGER PRIMARY KEY,
+    produto_nome TEXT NOT NULL,
+    custo        REAL NOT NULL DEFAULT 0
+)
+""")
+conn.commit()
+cursor.execute("SELECT COUNT(*) FROM custos")
+if cursor.fetchone()[0] == 0:
+    custos_iniciais = [
+        (1, "Cappuccino 260 ml", 7.30),
+        (2, "Barra de Proteína",  5.14),
+        (4, "Iogurte Proteico",   6.00),
+    ]
+    cursor.executemany("INSERT INTO custos (produto_id, produto_nome, custo) VALUES (?, ?, ?)", custos_iniciais)
+    conn.commit()
 
 # TABELA DE ESTOQUE
 cursor.execute("""
@@ -190,6 +209,17 @@ def marcar_pago_cliente(cliente_nome):
     cursor.execute("UPDATE pedidos SET pago = 1 WHERE cliente_nome = ? AND pago = 0", (cliente_nome,))
     conn.commit()
 
+def carregar_custos():
+    return {row[0]: row[1] for row in cursor.execute("SELECT produto_id, custo FROM custos").fetchall()}
+
+def definir_custo(produto_id, custo):
+    cursor.execute("UPDATE custos SET custo = ? WHERE produto_id = ?", (custo, produto_id))
+    conn.commit()
+
+def editar_venda(pedido_id, novo_valor_total):
+    cursor.execute("UPDATE pedidos SET valor_total = ? WHERE id = ?", (novo_valor_total, pedido_id))
+    conn.commit()
+
 def carregar_estoque():
     return {row[0]: row[1] for row in cursor.execute("SELECT produto_id, quantidade FROM estoque").fetchall()}
 
@@ -203,12 +233,14 @@ def definir_estoque(produto_id, quantidade):
 
 def salvar_pedido(nome, itens, forma_pagamento):
     pago = 1 if forma_pagamento == "agora" else 0
+    custos_db = carregar_custos()
     for item in itens:
         total = item["quantidade"] * item["preco"]
+        custo_unit = custos_db.get(item["id"], 0)
         cursor.execute("""
-            INSERT INTO pedidos (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total, forma_pagamento, pago)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (nome, item["nome"], item["quantidade"], item["preco"], total, forma_pagamento, pago))
+            INSERT INTO pedidos (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total, forma_pagamento, pago, custo_unitario)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (nome, item["nome"], item["quantidade"], item["preco"], total, forma_pagamento, pago, custo_unit))
         atualizar_estoque(item["id"], -item["quantidade"])
     conn.commit()
 
@@ -799,7 +831,7 @@ elif pagina == "Admin":
 
         st.divider()
 
-        aba_visao, aba_cobranca, aba_estoque, aba_pedidos = st.tabs(["Visao Geral", "Cobrar Clientes", "Estoque", "Todos os Pedidos"])
+        aba_visao, aba_financeiro, aba_cobranca, aba_estoque, aba_pedidos = st.tabs(["Visao Geral", "Financeiro", "Cobrar Clientes", "Estoque", "Todos os Pedidos"])
 
         if True:
 
@@ -827,7 +859,41 @@ elif pagina == "Admin":
                         top_cli.columns = ["Cliente", "Total Gasto"]
                         st.dataframe(top_cli, use_container_width=True, hide_index=True)
 
-            # ── ABA 2: COBRANÇAS POR CLIENTE ──
+            # ── ABA 2: FINANCEIRO ──
+            with aba_financeiro:
+                if df.empty:
+                    st.info("Nenhum pedido registrado ainda.")
+                else:
+                    receita = df["valor_total"].sum()
+                    custo_total = (df["custo_unitario"] * df["quantidade"]).sum() if "custo_unitario" in df.columns else 0
+                    lucro = receita - custo_total
+                    margem = (lucro / receita * 100) if receita > 0 else 0
+
+                    cf1, cf2, cf3, cf4 = st.columns(4)
+                    cf1.metric("Receita Total", brl(receita))
+                    cf2.metric("Custo Total", brl(custo_total))
+                    cf3.metric("Lucro", brl(lucro))
+                    cf4.metric("Margem", f"{margem:.1f}%")
+
+                    st.divider()
+                    st.subheader("Custo por Produto")
+                    st.caption("Atualize o custo unitario de compra de cada produto")
+                    custos_db = carregar_custos()
+                    produtos_com_custo = [p for p in PRODUTOS if p["id"] in custos_db]
+                    for p in produtos_com_custo:
+                        custo_atual = custos_db.get(p["id"], 0)
+                        cc1, cc2, cc3 = st.columns([3, 1.5, 1.5])
+                        with cc1:
+                            st.markdown(f"**{p['nome']}** — Venda: {brl(p['preco'])} | Custo atual: {brl(custo_atual)} | Margem: {brl(p['preco'] - custo_atual)}")
+                        with cc2:
+                            novo_custo = st.number_input("Custo", min_value=0.0, step=0.01, value=float(custo_atual), key=f"custo_{p['id']}", label_visibility="collapsed", format="%.2f")
+                        with cc3:
+                            if st.button("Atualizar custo", key=f"upd_custo_{p['id']}", use_container_width=True):
+                                definir_custo(p["id"], float(novo_custo))
+                                st.success("Custo atualizado!")
+                                st.rerun()
+
+            # ── ABA 3: COBRANÇAS POR CLIENTE ──
             with aba_cobranca:
                 df_pagar = df[df["pago"] == 0] if "pago" in df.columns else pd.DataFrame()
 
@@ -928,17 +994,26 @@ elif pagina == "Admin":
                             st.rerun()
 
                 for _, row in df.iterrows():
-                    pago_col = int(row["pago"]) if "pago" in row else 1
-                    forma_col = row.get("forma_pagamento", "agora")
-                    status_cor  = "#22c55e" if pago_col else "#f59e0b"
-                    status_txt  = "Pago" if pago_col else "Pendente"
-                    col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 2.2, 0.7, 1.1, 1.1, 0.9, 0.9])
+                    pago_col   = int(row["pago"]) if "pago" in row else 1
+                    status_cor = "#22c55e" if pago_col else "#f59e0b"
+                    status_txt = "Pago" if pago_col else "Pendente"
+                    col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 2.2, 0.7, 1.1, 1.2, 0.9, 0.9])
                     col1.write(row["cliente_nome"])
                     col2.write(row["produto_nome"])
                     col3.write(int(row["quantidade"]))
                     col4.write(brl(row["valor_unitario"]))
-                    col5.write(brl(row["valor_total"]))
-                    col6.markdown(f'<span style="color:{status_cor};font-weight:700;">{status_txt}</span>', unsafe_allow_html=True)
+                    novo_total = col5.number_input(
+                        "Valor", min_value=0.0, step=0.01,
+                        value=float(row["valor_total"]),
+                        key=f"edit_val_{row['id']}",
+                        label_visibility="collapsed", format="%.2f"
+                    )
+                    if novo_total != float(row["valor_total"]):
+                        if col6.button("Salvar", key=f"save_{row['id']}", type="primary"):
+                            editar_venda(int(row["id"]), novo_total)
+                            st.rerun()
+                    else:
+                        col6.markdown(f'<span style="color:{status_cor};font-weight:700;">{status_txt}</span>', unsafe_allow_html=True)
                     if col7.button("Excluir", key=f"del_{row['id']}"):
                         deletar_pedido(int(row["id"]))
                         st.rerun()
