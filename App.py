@@ -1826,38 +1826,41 @@ elif pagina == "Admin":
 
                 opcoes_produto = [p["nome"] for p in PRODUTOS] + ["Produto personalizado"]
 
-                col_lf1, col_lf2 = st.columns(2)
-                with col_lf1:
-                    cliente_manual = st.text_input("Nome do cliente *", key="manual_cliente",
-                                                    placeholder="Ex: João Silva")
-                    produto_sel = st.selectbox("Produto *", opcoes_produto, key="manual_produto")
+                cliente_manual = st.text_input("Nome do cliente *", key="manual_cliente",
+                                               placeholder="Ex: João Silva")
+                produto_sel = st.selectbox("Produto *", opcoes_produto, key="manual_produto")
 
-                    if produto_sel == "Produto personalizado":
-                        produto_nome_manual = st.text_input("Nome do produto *", key="manual_produto_nome",
-                                                             placeholder="Ex: Água mineral")
-                        produto_id_manual   = None
-                        preco_sug           = 1.0
-                        custo_sug           = 0.0
-                    else:
-                        produto_obj         = next((p for p in PRODUTOS if p["nome"] == produto_sel), None)
-                        produto_nome_manual = produto_sel
-                        produto_id_manual   = produto_obj["id"] if produto_obj else None
-                        preco_sug           = float(precos_lancar.get(produto_id_manual, produto_obj["preco"] if produto_obj else 1.0))
-                        custo_sug           = float(custos_lancar.get(produto_id_manual, 0.0))
+                if produto_sel == "Produto personalizado":
+                    produto_nome_manual = st.text_input("Nome do produto *", key="manual_produto_nome",
+                                                         placeholder="Ex: Água mineral")
+                    produto_id_manual   = None
+                    preco_sug           = 1.0
+                    custo_sug           = 0.0
+                else:
+                    produto_obj         = next((p for p in PRODUTOS if p["nome"] == produto_sel), None)
+                    produto_nome_manual = produto_sel
+                    produto_id_manual   = produto_obj["id"] if produto_obj else None
+                    preco_sug           = float(precos_lancar.get(produto_id_manual, produto_obj["preco"] if produto_obj else 1.0))
+                    custo_sug           = float(custos_lancar.get(produto_id_manual, 0.0))
 
+                col_qtd, col_preco, col_custo = st.columns(3)
+                with col_qtd:
                     qtd_manual = st.number_input("Quantidade *", min_value=1, step=1, value=1, key="manual_qtd")
-
-                with col_lf2:
-                    # Chave dinâmica: troca ao mudar o produto → Streamlit recria o widget com o novo valor padrão
+                with col_preco:
                     _k = produto_sel.replace(" ", "_")
-                    preco_manual  = st.number_input("Preço de venda (R$) *", min_value=0.01, step=0.50,
-                                                     value=preco_sug, key=f"manual_preco_{_k}", format="%.2f")
-                    custo_manual  = st.number_input("Custo unitário (R$)", min_value=0.0, step=0.50,
-                                                     value=custo_sug, key=f"manual_custo_{_k}", format="%.2f")
+                    preco_manual = st.number_input("Preço (R$) *", min_value=0.01, step=0.50,
+                                                    value=preco_sug, key=f"manual_preco_{_k}", format="%.2f")
+                with col_custo:
+                    custo_manual = st.number_input("Custo (R$)", min_value=0.0, step=0.50,
+                                                    value=custo_sug, key=f"manual_custo_{_k}", format="%.2f")
+
+                col_status, col_data = st.columns(2)
+                with col_status:
                     status_manual = st.radio("Pagamento *", ["Pago", "Pendente"],
                                              horizontal=True, key="manual_status")
-                    data_manual   = st.date_input("Data da venda *", value=date.today(),
-                                                   format="DD/MM/YYYY", key="manual_data")
+                with col_data:
+                    data_manual = st.date_input("Data da venda *", value=date.today(),
+                                                 format="DD/MM/YYYY", key="manual_data")
 
                 obs_manual = st.text_area("Observação (opcional)",
                                           placeholder="Ex: Venda feita pessoalmente no trabalho",
