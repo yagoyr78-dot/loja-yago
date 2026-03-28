@@ -1285,10 +1285,26 @@ elif pagina == "Meus Pedidos":
                 unsafe_allow_html=True
             )
 
-            r1, r2, r3 = st.columns(3)
-            r1.metric("Total de pedidos", total_pedidos)
-            r2.metric("Total pago",       brl(total_pago))
-            r3.metric("Pendente",         brl(total_pendente))
+            st.markdown(
+                f'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;">'
+                f'<div style="flex:1;min-width:90px;background:#f8fafc;border:1px solid #e2e8f0;'
+                f'border-radius:10px;padding:12px 14px;">'
+                f'<div style="font-size:0.72rem;color:#64748b;font-weight:600;margin-bottom:4px;">Pedidos</div>'
+                f'<div style="font-size:1.4rem;font-weight:800;color:#0f172a;">{total_pedidos}</div>'
+                f'</div>'
+                f'<div style="flex:1;min-width:90px;background:#f0fdf4;border:1px solid #86efac;'
+                f'border-radius:10px;padding:12px 14px;">'
+                f'<div style="font-size:0.72rem;color:#166534;font-weight:600;margin-bottom:4px;">Total pago</div>'
+                f'<div style="font-size:1.4rem;font-weight:800;color:#15803d;">{brl(total_pago)}</div>'
+                f'</div>'
+                f'<div style="flex:1;min-width:90px;background:#fffbeb;border:1px solid #fcd34d;'
+                f'border-radius:10px;padding:12px 14px;">'
+                f'<div style="font-size:0.72rem;color:#92400e;font-weight:600;margin-bottom:4px;">Pendente</div>'
+                f'<div style="font-size:1.4rem;font-weight:800;color:#d97706;">{brl(total_pendente)}</div>'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
 
             st.divider()
 
