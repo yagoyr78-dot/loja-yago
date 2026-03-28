@@ -531,7 +531,7 @@ st.markdown("""
 }
 .pc-desc {
     font-size: 0.76rem;
-    color: #a0aec0;
+    color: #7c8fa1;
     line-height: 1.45;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -577,12 +577,26 @@ button[kind="primary"],
     transform: scale(1.02) !important;
 }
 
-/* Number input compacto */
+/* Number input — moderno e integrado */
 [data-testid="stNumberInput"] {
     margin-top: 0 !important;
+    margin-bottom: 0 !important;
 }
 [data-testid="stNumberInput"] input {
     text-align: center !important;
+    font-weight: 700 !important;
+    font-size: 0.95rem !important;
+    border-radius: 10px !important;
+    border-color: #e2e8f0 !important;
+    background: #f8fafc !important;
+    color: #0f172a !important;
+    padding: 6px 4px !important;
+}
+[data-testid="stNumberInput"] button {
+    border-radius: 8px !important;
+    border-color: #e2e8f0 !important;
+    background: #f1f5f9 !important;
+    color: #475569 !important;
     font-weight: 700 !important;
 }
 /* Área abaixo do card (qty + botão) */
@@ -903,11 +917,11 @@ if pagina == "Produtos":
                     img_bg = "#f1f3f5" if p["id"] == 5 else "transparent"
                     # Ajuste fino de tamanho por produto para equilíbrio visual
                     img_h = {
-                        5: 132,   # Coca-Cola — maior
-                        4: 128,   # Iogurte Proteico — um pouco maior
-                        2: 105,   # Barra de Proteína — menor (embalagem larga)
-                        3: 112,   # Cappuccino em Pó — levemente reduzido
-                        1: 120,   # Cappuccino 260ml — padrão
+                        5: 138,   # Coca-Cola — maior
+                        4: 132,   # Iogurte Proteico — maior
+                        2: 108,   # Barra de Proteína — equilibrada
+                        3: 114,   # Cappuccino em Pó — contido
+                        1: 122,   # Cappuccino 260ml — padrão
                     }.get(p["id"], 120)
                     render_imagem_produto(p["imagem"], p["nome"], bg=img_bg, img_h=img_h)
                 with col_info:
