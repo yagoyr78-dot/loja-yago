@@ -81,7 +81,7 @@ def img_base64(path):
             return base64.b64encode(f.read()).decode()
     return ""
 
-def render_imagem_produto(caminho, alt=""):
+def render_imagem_produto(caminho, alt="", bg="transparent"):
     # Detecta o formato real do arquivo (ignora extensão — ex: PNG salvo como .jpg)
     try:
         with Image.open(caminho) as _img:
@@ -97,9 +97,8 @@ def render_imagem_produto(caminho, alt=""):
     else:
         img_html = '<div style="height:145px;"></div>'
 
-    # background:transparent → usa o fundo da página, sem contraste
     html = (
-        '<div style="background:transparent;display:flex;align-items:center;'
+        f'<div style="background:{bg};display:flex;align-items:center;'
         'justify-content:center;height:160px;padding:8px;">'
         + img_html + '</div>'
     )
@@ -908,7 +907,9 @@ if pagina == "Produtos":
                 # ── Linha superior: imagem | info (tudo HTML estático) ──
                 col_img, col_info = st.columns([1, 1.4])
                 with col_img:
-                    render_imagem_produto(p["imagem"], p["nome"])
+                    # Coca-Cola tem PNG transparente: fundo da página preenche as áreas transparentes
+                    img_bg = "#f8f9fa" if p["id"] == 5 else "transparent"
+                    render_imagem_produto(p["imagem"], p["nome"], bg=img_bg)
                 with col_info:
                     info_html = (
                         '<div class="pc-info">'
