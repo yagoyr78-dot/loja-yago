@@ -618,20 +618,24 @@ st.markdown("""
 
 h1, h2, h3 { color: #0f172a; }
 
-/* Imagens dos produtos — fundo branco + blend para eliminar checkerboard */
+/* Imagens dos produtos — todos os containers transparentes */
 [data-testid="stImage"],
 [data-testid="stImage"] > div,
 [data-testid="stImage"] figure,
-[data-testid="stImage"] figure > div {
-    background-color: #ffffff !important;
+[data-testid="stImage"] figure > div,
+[data-testid="stImage"] figcaption {
+    background: transparent !important;
+    background-color: transparent !important;
 }
+
+/* A imagem em si: blend com o fundo branco do card */
 [data-testid="stImage"] img {
-    background-color: #ffffff !important;
     mix-blend-mode: multiply;
-    border-radius: 8px;
     object-fit: contain;
+    width: 100% !important;
+    height: 160px !important;
+    background: transparent !important;
     display: block;
-    margin: 0 auto;
 }
 
 /* Badge NOVO */
@@ -816,10 +820,8 @@ if pagina == "Produtos":
             with st.container(border=True):
                 col_img, col_info = st.columns([1, 1.4])
                 with col_img:
-                    st.markdown('<div style="display:flex;align-items:center;justify-content:center;min-height:160px;background:#fff;border-radius:10px;">', unsafe_allow_html=True)
                     if os.path.exists(p["imagem"]):
                         st.image(p["imagem"], use_container_width=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
                 with col_info:
                     # Tag + badge NOVO (se aplicável)
                     badge_novo = '<span class="badge-novo">NOVO</span>' if is_novo else ""
