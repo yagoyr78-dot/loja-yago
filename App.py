@@ -81,6 +81,31 @@ def img_base64(path):
             return base64.b64encode(f.read()).decode()
     return ""
 
+def render_imagem_produto(caminho, alt=""):
+    """
+    Renderiza imagem de produto via HTML/base64.
+    Container branco garante que PNG transparente mostre branco (não quadriculado).
+    object-fit: contain preserva proporção sem cortar.
+    """
+    ext  = caminho.rsplit(".", 1)[-1].lower()
+    mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
+    b64  = img_base64(caminho)
+    if b64:
+        img_tag = (
+            f'<img src="data:{mime};base64,{b64}" '
+            f'alt="{alt}" '
+            f'style="max-height:150px;max-width:100%;object-fit:contain;display:block;">'
+        )
+    else:
+        img_tag = '<div style="height:150px;"></div>'
+    st.markdown(
+        f'<div style="background:#ffffff;border-radius:10px;'
+        f'display:flex;align-items:center;justify-content:center;'
+        f'height:165px;padding:10px;">'
+        f'{img_tag}</div>',
+        unsafe_allow_html=True
+    )
+
 
 # =========================
 # PRODUTOS
@@ -618,25 +643,7 @@ st.markdown("""
 
 h1, h2, h3 { color: #0f172a; }
 
-/* Imagens dos produtos — todos os containers transparentes */
-[data-testid="stImage"],
-[data-testid="stImage"] > div,
-[data-testid="stImage"] figure,
-[data-testid="stImage"] figure > div,
-[data-testid="stImage"] figcaption {
-    background: transparent !important;
-    background-color: transparent !important;
-}
-
-/* A imagem em si: blend com o fundo branco do card */
-[data-testid="stImage"] img {
-    mix-blend-mode: multiply;
-    object-fit: contain;
-    width: 100% !important;
-    height: 160px !important;
-    background: transparent !important;
-    display: block;
-}
+/* Imagens dos produtos são renderizadas via HTML/base64 — sem regras conflitantes */
 
 /* Badge NOVO */
 .badge-novo {
@@ -820,8 +827,7 @@ if pagina == "Produtos":
             with st.container(border=True):
                 col_img, col_info = st.columns([1, 1.4])
                 with col_img:
-                    if os.path.exists(p["imagem"]):
-                        st.image(p["imagem"], use_container_width=True)
+                    render_imagem_produto(p["imagem"], p["nome"])
                 with col_info:
                     # Tag + badge NOVO (se aplicável)
                     badge_novo = '<span class="badge-novo">NOVO</span>' if is_novo else ""
