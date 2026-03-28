@@ -1306,24 +1306,87 @@ elif pagina == "Admin":
                 if df.empty:
                     st.info("Nenhum pedido registrado ainda.")
                 else:
-                    col_tp, col_tc = st.columns(2)
-                    with col_tp:
-                        st.subheader("Top Produtos")
-                        top_prod = (
-                            df.groupby("produto_nome", as_index=False)["quantidade"]
-                            .sum().sort_values("quantidade", ascending=False).head(5)
+                    MESES_PT = {
+                        1:"Janeiro",2:"Fevereiro",3:"Março",4:"Abril",
+                        5:"Maio",6:"Junho",7:"Julho",8:"Agosto",
+                        9:"Setembro",10:"Outubro",11:"Novembro",12:"Dezembro",
+                    }
+
+                    # Parseia data_venda (formato "DD/MM/YYYY HH:MM" ou vazio)
+                    df_v = df.copy()
+                    df_v["_dt"] = pd.to_datetime(
+                        df_v["data_venda"], format="%d/%m/%Y %H:%M", errors="coerce"
+                    )
+                    df_v["_periodo"] = df_v["_dt"].dt.to_period("M")
+
+                    periodos_validos = (
+                        df_v["_periodo"].dropna().unique()
+                    )
+                    periodos_ord = sorted(periodos_validos, reverse=True)
+
+                    def fmt_mes(p):
+                        return f"{MESES_PT[p.month]}/{p.year}"
+
+                    opcoes_str  = [fmt_mes(p) for p in periodos_ord]
+                    periodo_hoje = pd.Period(date.today(), freq="M")
+                    idx_default  = (
+                        periodos_ord.index(periodo_hoje)
+                        if periodo_hoje in periodos_ord else 0
+                    )
+
+                    col_sel, col_esp = st.columns([2, 3])
+                    with col_sel:
+                        mes_escolhido = st.selectbox(
+                            "Período", opcoes_str,
+                            index=idx_default, key="visao_mes_sel"
                         )
-                        top_prod.columns = ["Produto", "Qtd Vendida"]
-                        st.dataframe(top_prod, use_container_width=True, hide_index=True)
-                    with col_tc:
-                        st.subheader("Top Clientes")
-                        top_cli = (
-                            df.groupby("cliente_nome", as_index=False)["valor_total"]
-                            .sum().sort_values("valor_total", ascending=False).head(5)
-                        )
-                        top_cli["valor_total"] = top_cli["valor_total"].apply(brl)
-                        top_cli.columns = ["Cliente", "Total Gasto"]
-                        st.dataframe(top_cli, use_container_width=True, hide_index=True)
+
+                    periodo_sel = periodos_ord[opcoes_str.index(mes_escolhido)]
+                    df_mes      = df_v[df_v["_periodo"] == periodo_sel]
+
+                    # ── Métricas do mês ──
+                    df_mes_pago = df_mes[df_mes["pago"] == 1]
+                    rec_mes  = df_mes_pago["valor_total"].sum()
+                    ped_mes  = len(df_mes)
+                    cli_mes  = df_mes["cliente_nome"].nunique()
+                    a_rec_mes = df_mes[df_mes["pago"] == 0]["valor_total"].sum()
+
+                    cm1, cm2, cm3, cm4 = st.columns(4)
+                    cm1.metric("Receita do mês",   brl(rec_mes))
+                    cm2.metric("A receber",         brl(a_rec_mes))
+                    cm3.metric("Pedidos no mês",    ped_mes)
+                    cm4.metric("Clientes no mês",   cli_mes)
+
+                    st.divider()
+
+                    if df_mes.empty:
+                        st.info(f"Nenhum pedido registrado em {mes_escolhido}.")
+                    else:
+                        col_tp, col_tc = st.columns(2)
+
+                        with col_tp:
+                            st.subheader(f"Top Produtos — {mes_escolhido}")
+                            top_prod = (
+                                df_mes.groupby("produto_nome", as_index=False)
+                                .agg(Qtd=("quantidade", "sum"), Faturamento=("valor_total", "sum"))
+                                .sort_values("Qtd", ascending=False)
+                                .head(5)
+                            )
+                            top_prod["Faturamento"] = top_prod["Faturamento"].apply(brl)
+                            top_prod.rename(columns={"produto_nome": "Produto"}, inplace=True)
+                            st.dataframe(top_prod, use_container_width=True, hide_index=True)
+
+                        with col_tc:
+                            st.subheader(f"Top Clientes — {mes_escolhido}")
+                            top_cli = (
+                                df_mes.groupby("cliente_nome", as_index=False)
+                                .agg(Total=("valor_total", "sum"), Pedidos=("id", "count"))
+                                .sort_values("Total", ascending=False)
+                                .head(5)
+                            )
+                            top_cli["Total"] = top_cli["Total"].apply(brl)
+                            top_cli.rename(columns={"cliente_nome": "Cliente"}, inplace=True)
+                            st.dataframe(top_cli, use_container_width=True, hide_index=True)
 
             # ── ABA 2: FINANCEIRO ──
             with aba_financeiro:
