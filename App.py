@@ -82,29 +82,28 @@ def img_base64(path):
     return ""
 
 def render_imagem_produto(caminho, alt=""):
-    """
-    Renderiza imagem de produto via HTML/base64.
-    Container branco garante que PNG transparente mostre branco (não quadriculado).
-    object-fit: contain preserva proporção sem cortar.
-    """
-    ext  = caminho.rsplit(".", 1)[-1].lower()
-    mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
-    b64  = img_base64(caminho)
+    # Detecta o formato real do arquivo (ignora extensão — ex: PNG salvo como .jpg)
+    try:
+        with Image.open(caminho) as _img:
+            mime = "image/png" if _img.format == "PNG" else "image/jpeg"
+    except Exception:
+        ext  = caminho.rsplit(".", 1)[-1].lower()
+        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
+
+    b64 = img_base64(caminho)
     if b64:
-        img_tag = (
-            f'<img src="data:{mime};base64,{b64}" '
-            f'alt="{alt}" '
-            f'style="max-height:150px;max-width:100%;object-fit:contain;display:block;">'
-        )
+        img_html = (f'<img src="data:{mime};base64,{b64}" alt="{alt}" '
+                    f'style="max-height:145px;max-width:100%;object-fit:contain;display:block;">')
     else:
-        img_tag = '<div style="height:150px;"></div>'
-    st.markdown(
-        f'<div style="background:#ffffff;border-radius:10px;'
-        f'display:flex;align-items:center;justify-content:center;'
-        f'height:165px;padding:10px;">'
-        f'{img_tag}</div>',
-        unsafe_allow_html=True
+        img_html = '<div style="height:145px;"></div>'
+
+    # background:transparent → usa o fundo da página, sem contraste
+    html = (
+        '<div style="background:transparent;display:flex;align-items:center;'
+        'justify-content:center;height:160px;padding:8px;">'
+        + img_html + '</div>'
     )
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # =========================
@@ -911,18 +910,18 @@ if pagina == "Produtos":
                 with col_img:
                     render_imagem_produto(p["imagem"], p["nome"])
                 with col_info:
-                    st.markdown(f"""
-                    <div class="pc-info">
-                        <div class="pc-toprow">
-                            <span class="pc-tag">{p['tag']}</span>
-                            {badge_novo}
-                        </div>
-                        <div class="pc-nome">{p['nome']}</div>
-                        <div class="pc-desc">{p['descricao']}</div>
-                        <div class="pc-preco">{brl(p['preco'])}</div>
-                        <div style="margin-top:4px;">{badge_est}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    info_html = (
+                        '<div class="pc-info">'
+                        '<div class="pc-toprow">'
+                        f'<span class="pc-tag">{p["tag"]}</span>{badge_novo}'
+                        '</div>'
+                        f'<div class="pc-nome">{p["nome"]}</div>'
+                        f'<div class="pc-desc">{p["descricao"]}</div>'
+                        f'<div class="pc-preco">{brl(p["preco"])}</div>'
+                        f'<div style="margin-top:4px;">{badge_est}</div>'
+                        '</div>'
+                    )
+                    st.markdown(info_html, unsafe_allow_html=True)
 
                 # ── Linha inferior: quantidade + botão ──
                 col_qtd, col_btn = st.columns([1, 2.5])
