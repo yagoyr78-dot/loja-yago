@@ -134,7 +134,7 @@ PRODUTOS = [
         "id": 5,
         "nome": "Coca Cola",
         "preco": 6.00,
-        "imagem": caminho_imagem("coca_cola.png"),
+        "imagem": caminho_imagem("Coca Cola.jpg"),
         "descricao": "Refrigerante gelado. Clássico e refrescante.",
         "tag": "Bebida",
         "criado_em": "2026-03-27",   # data de hoje — badge NOVO por 7 dias
