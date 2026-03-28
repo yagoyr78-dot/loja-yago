@@ -93,13 +93,13 @@ def render_imagem_produto(caminho, alt="", bg="transparent"):
     b64 = img_base64(caminho)
     if b64:
         img_html = (f'<img src="data:{mime};base64,{b64}" alt="{alt}" '
-                    f'style="max-height:145px;max-width:100%;object-fit:contain;display:block;">')
+                    f'style="max-height:120px;object-fit:contain;">')
     else:
-        img_html = '<div style="height:145px;"></div>'
+        img_html = '<div style="height:120px;"></div>'
 
     html = (
-        f'<div style="background:{bg};display:flex;align-items:center;'
-        'justify-content:center;height:160px;padding:8px;">'
+        f'<div style="background:{bg};border-radius:12px;padding:10px;'
+        'display:flex;align-items:center;justify-content:center;height:140px;">'
         + img_html + '</div>'
     )
     st.markdown(html, unsafe_allow_html=True)
@@ -908,7 +908,7 @@ if pagina == "Produtos":
                 col_img, col_info = st.columns([1, 1.4])
                 with col_img:
                     # Coca-Cola tem PNG transparente: fundo da página preenche as áreas transparentes
-                    img_bg = "#f8f9fa" if p["id"] == 5 else "transparent"
+                    img_bg = "#f1f3f5" if p["id"] == 5 else "transparent"
                     render_imagem_produto(p["imagem"], p["nome"], bg=img_bg)
                 with col_info:
                     info_html = (
