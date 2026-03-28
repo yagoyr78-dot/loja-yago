@@ -81,7 +81,7 @@ def img_base64(path):
             return base64.b64encode(f.read()).decode()
     return ""
 
-def render_imagem_produto(caminho, alt="", bg="transparent"):
+def render_imagem_produto(caminho, alt="", bg="transparent", img_h=120):
     # Detecta o formato real do arquivo (ignora extensão — ex: PNG salvo como .jpg)
     try:
         with Image.open(caminho) as _img:
@@ -93,10 +93,10 @@ def render_imagem_produto(caminho, alt="", bg="transparent"):
     b64 = img_base64(caminho)
     if b64:
         img_html = (f'<img src="data:{mime};base64,{b64}" alt="{alt}" '
-                    f'style="max-height:120px;max-width:100%;object-fit:contain;'
+                    f'style="max-height:{img_h}px;max-width:100%;object-fit:contain;'
                     f'filter:drop-shadow(0 6px 12px rgba(0,0,0,0.08));">')
     else:
-        img_html = '<div style="height:120px;"></div>'
+        img_html = f'<div style="height:{img_h}px;"></div>'
 
     html = (
         f'<div style="background:{bg};border-radius:14px;padding:12px;'
@@ -908,9 +908,16 @@ if pagina == "Produtos":
                 # ── Linha superior: imagem | info (tudo HTML estático) ──
                 col_img, col_info = st.columns([1, 1.4])
                 with col_img:
-                    # Coca-Cola tem PNG transparente: fundo da página preenche as áreas transparentes
                     img_bg = "#f1f3f5" if p["id"] == 5 else "transparent"
-                    render_imagem_produto(p["imagem"], p["nome"], bg=img_bg)
+                    # Ajuste fino de tamanho por produto para equilíbrio visual
+                    img_h = {
+                        5: 132,   # Coca-Cola — maior
+                        4: 128,   # Iogurte Proteico — um pouco maior
+                        2: 105,   # Barra de Proteína — menor (embalagem larga)
+                        3: 112,   # Cappuccino em Pó — levemente reduzido
+                        1: 120,   # Cappuccino 260ml — padrão
+                    }.get(p["id"], 120)
+                    render_imagem_produto(p["imagem"], p["nome"], bg=img_bg, img_h=img_h)
                 with col_info:
                     info_html = (
                         '<div class="pc-info">'
