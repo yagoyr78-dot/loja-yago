@@ -960,25 +960,70 @@ div[data-testid="stRadio"] > div > label {
     /* ── ADMIN: dataframes com scroll horizontal ── */
     [data-testid="stDataFrame"] { overflow-x: auto !important; }
 
-    /* ── LABELS DE FORMULÁRIO: garantir visibilidade no mobile ── */
+    /* ── LABELS DE FORMULÁRIO: visibilidade completa no mobile ── */
+
+    /* Contêiner do label: nunca escondido */
+    [data-testid="stWidgetLabel"] {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        margin-bottom: 4px !important;
+    }
+
+    /* Todo elemento filho do label: cor escura, visível */
+    [data-testid="stWidgetLabel"],
+    [data-testid="stWidgetLabel"] *,
     [data-testid="stWidgetLabel"] p,
     [data-testid="stWidgetLabel"] label,
-    [data-testid="stTextInput"]   label,
-    [data-testid="stSelectbox"]   label,
-    [data-testid="stNumberInput"] label,
-    [data-testid="stTextArea"]    label,
-    [data-testid="stDateInput"]   label,
-    [data-testid="stRadio"]     > label,
-    [data-testid="stSubheader"],
-    [data-testid="stCaptionContainer"] p {
+    [data-testid="stWidgetLabel"] span,
+    [data-testid="stWidgetLabel"] div {
+        color: #1e293b !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        font-size: 0.85rem !important;
+        font-weight: 600 !important;
+    }
+
+    /* Cobre variações de estrutura HTML do Streamlit */
+    [data-testid="stTextInput"]   > label,
+    [data-testid="stTextInput"]   > div > label,
+    [data-testid="stSelectbox"]   > label,
+    [data-testid="stSelectbox"]   > div > label,
+    [data-testid="stNumberInput"] > label,
+    [data-testid="stNumberInput"] > div > label,
+    [data-testid="stTextArea"]    > label,
+    [data-testid="stTextArea"]    > div > label,
+    [data-testid="stDateInput"]   > label,
+    [data-testid="stDateInput"]   > div > label,
+    [data-testid="stRadio"]       > label,
+    [data-testid="stRadio"]       > div > label {
+        color: #1e293b !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        display: block !important;
+        font-size: 0.85rem !important;
+        font-weight: 600 !important;
+        margin-bottom: 4px !important;
+    }
+
+    /* Texto digitado nos inputs */
+    [data-testid="stTextInput"]   input,
+    [data-testid="stNumberInput"] input,
+    [data-testid="stTextArea"]    textarea {
+        color: #0f172a !important;
+        background: #ffffff !important;
+        opacity: 1 !important;
+    }
+
+    /* Selectbox: texto da opção selecionada */
+    [data-baseweb="select"] span,
+    [data-baseweb="select"] div {
         color: #0f172a !important;
     }
-    /* Inputs: texto digitado também visível */
-    [data-testid="stTextInput"] input,
-    [data-testid="stTextArea"]  textarea,
-    [data-testid="stSelectbox"] [data-baseweb="select"] span {
-        color: #0f172a !important;
-    }
+
+    /* Caption e subheaders */
+    [data-testid="stCaptionContainer"] p,
+    [data-testid="stSubheader"] { color: #334155 !important; }
 
     /* ── RADIO: todos recebem estilo escuro (nav principal) ── */
     div[data-testid="stRadio"] > div {
