@@ -6,6 +6,7 @@ import io
 from datetime import date
 
 import streamlit as st
+import streamlit.components.v1 as components
 import qrcode
 from PIL import Image
 
@@ -389,6 +390,8 @@ if "pedido_enviado" not in st.session_state:
     st.session_state.pedido_enviado = False
 if "admin_logado" not in st.session_state:
     st.session_state.admin_logado = False
+if "nome_editando" not in st.session_state:
+    st.session_state.nome_editando = not bool(st.query_params.get("nome", "").strip())
 
 def adicionar(produto, qtd):
     for item in st.session_state.carrinho:
@@ -927,6 +930,25 @@ st.markdown(f"""
 # SIDEBAR - CARRINHO
 # =========================
 with st.sidebar:
+    # ── JS: ao abrir a página, lê localStorage e injeta o nome na URL (1 reload) ──
+    components.html("""
+    <script>
+    (function() {
+        try {
+            var saved = localStorage.getItem('loja_yago_nome');
+            var params = new URLSearchParams(window.parent.location.search);
+            if (saved && !params.has('nome')) {
+                params.set('nome', saved);
+                window.parent.location.search = params.toString();
+            }
+        } catch(e) {}
+    })();
+    </script>
+    """, height=0)
+
+    # ── Nome persistido via query param ──
+    nome_persistido = st.query_params.get("nome", "").strip()
+
     st.markdown('<div class="cart-titulo">Meu Carrinho</div>', unsafe_allow_html=True)
 
     if st.session_state.carrinho:
@@ -951,8 +973,62 @@ with st.sidebar:
         </div>
         """, unsafe_allow_html=True)
 
-        st.markdown('<p style="font-size:0.85rem;font-weight:700;color:#0f172a;margin-bottom:4px;">Seu nome <span style="color:#ef4444;">*</span></p>', unsafe_allow_html=True)
-        nome = st.text_input("Seu nome", placeholder="Digite seu nome completo", label_visibility="collapsed")
+        # ── Campo nome controlado ──
+        if nome_persistido and not st.session_state.nome_editando:
+            # Estado travado: exibe nome salvo
+            st.markdown(
+                f'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;'
+                f'padding:10px 14px;margin-bottom:6px;">'
+                f'<div style="font-size:0.7rem;font-weight:700;color:#166534;text-transform:uppercase;'
+                f'letter-spacing:0.5px;margin-bottom:3px;">Identificado como</div>'
+                f'<div style="font-weight:800;color:#0f172a;font-size:1rem;">👤 {nome_persistido}</div>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+            if st.button("✏️ Alterar nome", key="btn_alterar_nome", use_container_width=True):
+                st.session_state.nome_editando = True
+                st.rerun()
+            nome = nome_persistido
+        else:
+            # Estado de edição: campo livre + botão salvar
+            label_txt = "Alterar nome" if nome_persistido else 'Seu nome <span style="color:#ef4444;">*</span>'
+            st.markdown(
+                f'<p style="font-size:0.85rem;font-weight:700;color:#0f172a;margin-bottom:4px;">{label_txt}</p>',
+                unsafe_allow_html=True
+            )
+            nome_input = st.text_input(
+                "Nome", value=nome_persistido,
+                placeholder="Digite seu nome completo",
+                label_visibility="collapsed", key="nome_input_field"
+            )
+            if nome_persistido:
+                col_s, col_c = st.columns([3, 1])
+            else:
+                col_s = st.container()
+                col_c = None
+            with col_s:
+                salvar_nome = st.button("Salvar nome", key="btn_salvar_nome",
+                                        use_container_width=True, type="primary")
+            if col_c:
+                with col_c:
+                    if st.button("✕", key="btn_cancelar_nome", use_container_width=True):
+                        st.session_state.nome_editando = False
+                        st.rerun()
+            if salvar_nome:
+                nome_limpo = (nome_input or "").strip()
+                if len(nome_limpo) < 2:
+                    st.warning("Nome deve ter pelo menos 2 caracteres.")
+                elif not any(c.isalpha() for c in nome_limpo):
+                    st.warning("Nome inválido. Use letras.")
+                else:
+                    st.query_params["nome"] = nome_limpo
+                    st.session_state.nome_editando = False
+                    components.html(
+                        f"<script>try{{localStorage.setItem('loja_yago_nome',{repr(nome_limpo)})}}catch(e){{}}</script>",
+                        height=0
+                    )
+                    st.rerun()
+            nome = (nome_input or "").strip()
 
         forma = st.radio(
             "Forma de pagamento",
