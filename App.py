@@ -417,6 +417,9 @@ if "admin_logado" not in st.session_state:
 if "nome_editando" not in st.session_state:
     st.session_state.nome_editando = not bool(st.query_params.get("nome", "").strip())
 
+# Nome do cliente disponível em todo o app (sidebar + Meus Pedidos)
+nome_persistido = st.query_params.get("nome", "").strip()
+
 def adicionar(produto, qtd):
     for item in st.session_state.carrinho:
         if item["id"] == produto["id"]:
@@ -970,9 +973,6 @@ with st.sidebar:
     </script>
     """, height=0)
 
-    # ── Nome persistido via query param ──
-    nome_persistido = st.query_params.get("nome", "").strip()
-
     st.markdown('<div class="cart-titulo">Meu Carrinho</div>', unsafe_allow_html=True)
 
     if st.session_state.carrinho:
@@ -1122,7 +1122,7 @@ with st.sidebar:
 # =========================
 # MENU
 # =========================
-pagina = st.radio("", ["Produtos", "Contato", "Admin"], horizontal=True)
+pagina = st.radio("", ["Produtos", "Meus Pedidos", "Contato", "Admin"], horizontal=True)
 
 
 # =========================
@@ -1208,6 +1208,101 @@ if pagina == "Produtos":
                             adicionar(p, int(qtd))
                             st.success(f"{p['nome']} adicionado!")
                             st.rerun()
+
+
+# =========================
+# PÁGINA MEUS PEDIDOS
+# =========================
+elif pagina == "Meus Pedidos":
+
+    st.markdown('<div class="section-title">Meus Pedidos</div>', unsafe_allow_html=True)
+
+    if not nome_persistido:
+        st.markdown("""
+        <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:14px;
+        padding:24px;text-align:center;margin-top:16px;">
+            <div style="font-size:2rem;margin-bottom:10px;">👤</div>
+            <div style="font-weight:700;font-size:1rem;color:#92400e;margin-bottom:6px;">
+                Identifique-se para ver seus pedidos
+            </div>
+            <div style="color:#78350f;font-size:0.88rem;">
+                Adicione seu nome no carrinho (coluna à esquerda) para acessar seu histórico de compras.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        df_todos = carregar_vendas()
+
+        # Filtra apenas pedidos do cliente identificado (comparação case-insensitive)
+        if df_todos.empty:
+            df_cli = pd.DataFrame()
+        else:
+            df_cli = df_todos[
+                df_todos["cliente_nome"].str.strip().str.lower() == nome_persistido.lower()
+            ].copy()
+
+        if df_cli.empty:
+            st.markdown(f"""
+            <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:14px;
+            padding:24px;text-align:center;margin-top:16px;">
+                <div style="font-size:2rem;margin-bottom:10px;">📦</div>
+                <div style="font-weight:700;font-size:1rem;color:#0369a1;margin-bottom:6px;">
+                    Olá, {nome_persistido}!
+                </div>
+                <div style="color:#0c4a6e;font-size:0.88rem;">
+                    Você ainda não tem pedidos registrados.
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            # ── Resumo do cliente ──
+            total_pedidos  = len(df_cli)
+            total_pago     = df_cli[df_cli["pago"] == 1]["valor_total"].sum()
+            total_pendente = df_cli[df_cli["pago"] == 0]["valor_total"].sum()
+
+            st.markdown(
+                f'<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;'
+                f'padding:14px 18px;margin-bottom:20px;font-size:0.95rem;color:#0c4a6e;">'
+                f'Olá, <b>{nome_persistido}</b>! Aqui estão todas as suas compras.'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+            r1, r2, r3 = st.columns(3)
+            r1.metric("Total de pedidos", total_pedidos)
+            r2.metric("Total pago",       brl(total_pago))
+            r3.metric("Pendente",         brl(total_pendente))
+
+            st.divider()
+
+            # ── Lista de pedidos (mais recente primeiro) ──
+            for _, row in df_cli.iterrows():
+                pago_val   = int(row["pago"]) if "pago" in row else 1
+                data_txt   = str(row["data_venda"])[:16] if row.get("data_venda") else "—"
+                status_cor = "#22c55e" if pago_val else "#f59e0b"
+                status_txt = "✅ Pago" if pago_val else "⏳ Pendente"
+                borda_cor  = "#86efac" if pago_val else "#fcd34d"
+
+                st.markdown(
+                    f'<div style="background:white;border:1px solid {borda_cor};border-left:5px solid {borda_cor};'
+                    f'border-radius:12px;padding:14px 18px;margin-bottom:10px;">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+                    f'<span style="font-weight:700;color:#0f172a;font-size:0.95rem;">{row["produto_nome"]}</span>'
+                    f'<span style="font-weight:700;color:{status_cor};font-size:0.85rem;">{status_txt}</span>'
+                    f'</div>'
+                    f'<div style="display:flex;gap:24px;flex-wrap:wrap;">'
+                    f'<div><span style="color:#64748b;font-size:0.78rem;">Quantidade</span><br>'
+                    f'<b style="color:#0f172a;">{int(row["quantidade"])}x</b></div>'
+                    f'<div><span style="color:#64748b;font-size:0.78rem;">Valor unitário</span><br>'
+                    f'<b style="color:#0f172a;">{brl(row["valor_unitario"])}</b></div>'
+                    f'<div><span style="color:#64748b;font-size:0.78rem;">Total</span><br>'
+                    f'<b style="color:#0f172a;">{brl(row["valor_total"])}</b></div>'
+                    f'<div><span style="color:#64748b;font-size:0.78rem;">Data</span><br>'
+                    f'<b style="color:#0f172a;">{data_txt}</b></div>'
+                    f'</div>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
 
 
 # =========================
