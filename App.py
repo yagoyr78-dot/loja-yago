@@ -917,20 +917,39 @@ div[data-testid="stRadio"] > div > label {
         margin-bottom: 10px !important;
     }
 
-    /* ── ADMIN: abas com scroll horizontal ── */
+    /* ── ADMIN: abas — scroll + contraste no mobile ── */
     [data-testid="stTabBar"] {
         overflow-x: auto !important;
         flex-wrap: nowrap !important;
         -webkit-overflow-scrolling: touch !important;
         scrollbar-width: none !important;
-        padding-bottom: 2px !important;
+        background: #1e3a5f !important;
+        border-radius: 10px !important;
+        padding: 4px !important;
+        gap: 2px !important;
+        border-bottom: none !important;
     }
     [data-testid="stTabBar"]::-webkit-scrollbar { display: none !important; }
+
+    /* Aba inativa: texto claro sobre fundo escuro */
     button[data-testid="stTab"] {
         white-space: nowrap !important;
         flex-shrink: 0 !important;
         font-size: 0.78rem !important;
-        padding: 8px 10px !important;
+        font-weight: 600 !important;
+        padding: 8px 12px !important;
+        color: #93c5fd !important;
+        background: transparent !important;
+        border: none !important;
+        border-radius: 8px !important;
+        border-bottom: none !important;
+    }
+
+    /* Aba ativa: destaque branco */
+    button[data-testid="stTab"][aria-selected="true"] {
+        background: #ffffff !important;
+        color: #0f172a !important;
+        font-weight: 700 !important;
     }
 
     /* ── ADMIN: st.metric legível em 1 coluna ── */
