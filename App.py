@@ -609,6 +609,28 @@ button[kind="primary"],
     background: white;
     border-right: 1px solid #e2e8f0;
 }
+
+/* Campo "Seu nome" — destaque obrigatório */
+[data-testid="stSidebar"] [data-testid="stTextInput"] input {
+    background: #f8fafc !important;
+    border: 2px solid #cbd5e1 !important;
+    border-radius: 10px !important;
+    font-size: 0.95rem !important;
+    font-weight: 500 !important;
+    color: #0f172a !important;
+    padding: 10px 14px !important;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+[data-testid="stSidebar"] [data-testid="stTextInput"] input::placeholder {
+    color: #94a3b8 !important;
+    font-weight: 400 !important;
+}
+[data-testid="stSidebar"] [data-testid="stTextInput"] input:focus {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.15) !important;
+    background: #ffffff !important;
+    outline: none !important;
+}
 .cart-titulo {
     font-size: 1.2rem;
     font-weight: 700;
@@ -800,7 +822,8 @@ with st.sidebar:
         </div>
         """, unsafe_allow_html=True)
 
-        nome = st.text_input("Seu nome", placeholder="Digite seu nome completo")
+        st.markdown('<p style="font-size:0.85rem;font-weight:700;color:#0f172a;margin-bottom:4px;">Seu nome <span style="color:#ef4444;">*</span></p>', unsafe_allow_html=True)
+        nome = st.text_input("Seu nome", placeholder="Digite seu nome completo", label_visibility="collapsed")
 
         forma = st.radio(
             "Forma de pagamento",
