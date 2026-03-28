@@ -121,7 +121,7 @@ PRODUTOS = [
         "id": 5,
         "nome": "Coca Cola",
         "preco": 6.00,
-        "imagem": caminho_imagem("Coca Cola.jpg"),
+        "imagem": caminho_imagem("Coca Cola Branco.png"),
         "descricao": "Refrigerante gelado. Clássico e refrescante.",
         "tag": "Bebida",
         "criado_em": "2026-03-27",
