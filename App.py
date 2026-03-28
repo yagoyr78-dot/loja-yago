@@ -121,7 +121,7 @@ def produto_is_novo(data_criacao_str, dias=7):
     except Exception:
         return False
 
-PRODUTOS = [
+_PRODUTOS_BASE = [
     {
         "id": 5,
         "nome": "Coca Cola",
@@ -250,6 +250,33 @@ else:
     cursor.execute("INSERT OR IGNORE INTO estoque (produto_id, produto_nome, quantidade) VALUES (5, 'Coca Cola', 20)")
     conn.commit()
 
+# TABELA DE PREÇOS (editável pelo admin)
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS precos (
+    produto_id   INTEGER PRIMARY KEY,
+    produto_nome TEXT NOT NULL,
+    preco        REAL NOT NULL
+)
+""")
+conn.commit()
+# Popula com preços base se vazia
+cursor.execute("SELECT COUNT(*) FROM precos")
+if cursor.fetchone()[0] == 0:
+    for _p in _PRODUTOS_BASE:
+        cursor.execute(
+            "INSERT OR IGNORE INTO precos (produto_id, produto_nome, preco) VALUES (?, ?, ?)",
+            (_p["id"], _p["nome"], _p["preco"])
+        )
+    conn.commit()
+else:
+    # Garante que todos os produtos base existem mesmo em banco já criado
+    for _p in _PRODUTOS_BASE:
+        cursor.execute(
+            "INSERT OR IGNORE INTO precos (produto_id, produto_nome, preco) VALUES (?, ?, ?)",
+            (_p["id"], _p["nome"], _p["preco"])
+        )
+    conn.commit()
+
 import pandas as pd
 
 def carregar_vendas():
@@ -302,6 +329,13 @@ def definir_estoque(produto_id, quantidade):
     cursor.execute("UPDATE estoque SET quantidade = ? WHERE produto_id = ?", (quantidade, produto_id))
     conn.commit()
 
+def carregar_precos():
+    return {row[0]: row[1] for row in cursor.execute("SELECT produto_id, preco FROM precos").fetchall()}
+
+def definir_preco(produto_id, preco):
+    cursor.execute("UPDATE precos SET preco = ? WHERE produto_id = ?", (float(preco), int(produto_id)))
+    conn.commit()
+
 def salvar_pedido(nome, itens, forma_pagamento):
     from datetime import datetime
     pago = 1 if forma_pagamento == "agora" else 0
@@ -337,6 +371,11 @@ def gerar_whatsapp(nome, itens, forma_pagamento="agora"):
     linhas += ["", f"Total: {brl(total_geral)}"]
     texto = "\n".join(linhas)
     return f"https://wa.me/{WHATSAPP_NUMERO}?text={quote(texto)}"
+
+
+# Computa PRODUTOS com preços do banco (atualizado a cada rerun)
+_precos_db = carregar_precos()
+PRODUTOS = [{**p, "preco": _precos_db.get(p["id"], p["preco"])} for p in _PRODUTOS_BASE]
 
 
 # =========================
@@ -847,6 +886,21 @@ div[data-testid="stRadio"] > div > label {
     [data-testid="stVerticalBlockBorderWrapper"] {
         margin-bottom: 10px !important;
     }
+
+    /* ── RADIO: contraste no mobile ── */
+    div[data-testid="stRadio"] > div {
+        background: #1e3a5f !important;
+        border-color: #3b82f6 !important;
+        width: 100% !important;
+        justify-content: stretch !important;
+    }
+    div[data-testid="stRadio"] > div > label {
+        color: #ffffff !important;
+        padding: 10px 16px !important;
+        font-size: 0.95rem !important;
+        flex: 1 !important;
+        text-align: center !important;
+    }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -1141,7 +1195,7 @@ elif pagina == "Admin":
 
         st.divider()
 
-        aba_visao, aba_financeiro, aba_cobranca, aba_estoque, aba_pedidos = st.tabs(["Visao Geral", "Financeiro", "Cobrar Clientes", "Estoque", "Todos os Pedidos"])
+        aba_visao, aba_financeiro, aba_cobranca, aba_estoque, aba_precos, aba_pedidos = st.tabs(["Visao Geral", "Financeiro", "Cobrar Clientes", "Estoque", "Preços", "Todos os Pedidos"])
 
         if True:
 
@@ -1343,7 +1397,43 @@ elif pagina == "Admin":
 
                 st.info("Cappuccino em Po nao tem controle de estoque (vendido por dose).")
 
-            # ── ABA 4: TODOS OS PEDIDOS ──
+            # ── ABA 5: PREÇOS ──
+            with aba_precos:
+                st.subheader("Editar Preços de Venda")
+                st.caption("Altere o preço de cada produto. O novo valor é refletido imediatamente nos cards.")
+                precos_atuais = carregar_precos()
+
+                col_ph1, col_ph2, col_ph3 = st.columns([2.5, 1.5, 1.5])
+                col_ph1.markdown("**Produto**")
+                col_ph2.markdown("**Preço atual (R$)**")
+
+                for p in _PRODUTOS_BASE:
+                    preco_atual = precos_atuais.get(p["id"], p["preco"])
+                    col_pn, col_pv, col_pb = st.columns([2.5, 1.5, 1.5])
+                    with col_pn:
+                        st.markdown(
+                            f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;'
+                            f'padding:10px 14px;margin-bottom:4px;">'
+                            f'<div style="font-weight:700;color:#0f172a;">{p["nome"]}</div>'
+                            f'<div style="font-size:0.8rem;color:#64748b;">Preço base: R$ {p["preco"]:.2f}</div>'
+                            f'</div>',
+                            unsafe_allow_html=True
+                        )
+                    with col_pv:
+                        novo_preco = st.number_input(
+                            "Preço", min_value=0.01, step=0.50,
+                            value=float(preco_atual),
+                            key=f"preco_{p['id']}",
+                            label_visibility="collapsed",
+                            format="%.2f"
+                        )
+                    with col_pb:
+                        st.markdown("<div style='margin-top:4px;'></div>", unsafe_allow_html=True)
+                        if st.button("Salvar", key=f"upd_preco_{p['id']}", use_container_width=True, type="primary"):
+                            definir_preco(p["id"], novo_preco)
+                            st.success(f"{p['nome']}: preço atualizado para R$ {novo_preco:.2f}")
+                            st.rerun()
+
             with aba_pedidos:
                 if df.empty:
                     st.info("Nenhum pedido registrado ainda.")
