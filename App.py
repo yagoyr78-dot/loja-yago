@@ -917,19 +917,36 @@ div[data-testid="stRadio"] > div > label {
         margin-bottom: 10px !important;
     }
 
-    /* ── RADIO: contraste no mobile ── */
+    /* ── RADIO: navegação em grade 2×2 no mobile ── */
     div[data-testid="stRadio"] > div {
         background: #1e3a5f !important;
         border-color: #3b82f6 !important;
         width: 100% !important;
-        justify-content: stretch !important;
+        flex-wrap: wrap !important;
+        gap: 4px !important;
+        padding: 4px !important;
+        border-radius: 14px !important;
     }
     div[data-testid="stRadio"] > div > label {
         color: #ffffff !important;
-        padding: 10px 16px !important;
-        font-size: 0.95rem !important;
-        flex: 1 !important;
+        padding: 11px 8px !important;
+        font-size: 0.85rem !important;
+        flex: 1 1 calc(50% - 8px) !important;
+        min-width: calc(50% - 8px) !important;
         text-align: center !important;
+        box-sizing: border-box !important;
+        border-radius: 10px !important;
+        line-height: 1.2 !important;
+    }
+
+    /* ── CARDS DE PEDIDO: grid 2×2 no mobile ── */
+    .pedido-row {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 10px 16px !important;
+    }
+    .pedido-card {
+        padding: 12px 14px !important;
     }
 }
 </style>
@@ -1284,13 +1301,16 @@ elif pagina == "Meus Pedidos":
                 borda_cor  = "#86efac" if pago_val else "#fcd34d"
 
                 st.markdown(
-                    f'<div style="background:white;border:1px solid {borda_cor};border-left:5px solid {borda_cor};'
-                    f'border-radius:12px;padding:14px 18px;margin-bottom:10px;">'
-                    f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
-                    f'<span style="font-weight:700;color:#0f172a;font-size:0.95rem;">{row["produto_nome"]}</span>'
-                    f'<span style="font-weight:700;color:{status_cor};font-size:0.85rem;">{status_txt}</span>'
+                    f'<div class="pedido-card" style="background:white;border:1px solid {borda_cor};'
+                    f'border-left:5px solid {borda_cor};border-radius:12px;padding:14px 18px;margin-bottom:10px;">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:flex-start;'
+                    f'margin-bottom:10px;gap:8px;">'
+                    f'<span style="font-weight:700;color:#0f172a;font-size:0.95rem;line-height:1.3;">'
+                    f'{row["produto_nome"]}</span>'
+                    f'<span style="font-weight:700;color:{status_cor};font-size:0.82rem;white-space:nowrap;">'
+                    f'{status_txt}</span>'
                     f'</div>'
-                    f'<div style="display:flex;gap:24px;flex-wrap:wrap;">'
+                    f'<div class="pedido-row" style="display:flex;gap:24px;flex-wrap:wrap;">'
                     f'<div><span style="color:#64748b;font-size:0.78rem;">Quantidade</span><br>'
                     f'<b style="color:#0f172a;">{int(row["quantidade"])}x</b></div>'
                     f'<div><span style="color:#64748b;font-size:0.78rem;">Valor unitário</span><br>'
