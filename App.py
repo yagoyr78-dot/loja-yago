@@ -773,6 +773,81 @@ div[data-testid="stRadio"] > div > label {
     font-weight: 600 !important;
     font-size: 0.9rem !important;
 }
+
+/* ═══════════════════════════════════
+   RESPONSIVIDADE MOBILE (≤ 640px)
+   ═══════════════════════════════════ */
+@media (max-width: 640px) {
+
+    /* Página: reduz padding lateral */
+    .block-container {
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+        padding-top: 2rem !important;
+    }
+
+    /* Hero: compacta banner */
+    .hero {
+        padding: 26px 18px !important;
+        margin-bottom: 20px !important;
+    }
+    .hero h1 { font-size: 1.45rem !important; }
+    .hero p  { font-size: 0.88rem !important; }
+
+    /* ── GRADE EXTERNA: cards passam para 1 coluna ── */
+    [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+    }
+    [data-testid="stColumn"] {
+        min-width: 100% !important;
+        width: 100% !important;
+        flex: 1 1 100% !important;
+    }
+
+    /* Exceção: colunas DENTRO do card (img|info e qty|btn) ficam lado a lado */
+    [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stColumn"] {
+        min-width: 0 !important;
+        width: auto !important;
+        flex: 1 1 auto !important;
+    }
+
+    /* ── CARD: tipografia e espaçamento ── */
+    .pc-info  { padding: 12px 10px 8px 4px !important; gap: 3px !important; }
+    .pc-nome  { font-size: 0.92rem !important; }
+    .pc-desc  { font-size: 0.71rem !important; }
+    .pc-preco { font-size: 1.18rem !important; }
+
+    /* ── BOTÃO: touch target confortável ── */
+    [data-testid="stBaseButton-primary"] {
+        min-height: 46px !important;
+        font-size: 0.9rem !important;
+    }
+
+    /* ── NUMBER INPUT: maior para toque ── */
+    [data-testid="stNumberInput"] input {
+        min-height: 42px !important;
+        font-size: 1rem !important;
+    }
+    [data-testid="stNumberInput"] button {
+        min-height: 42px !important;
+    }
+
+    /* ── CAMPO NOME: confortável no celular ── */
+    [data-testid="stSidebar"] [data-testid="stTextInput"] input {
+        min-height: 50px !important;
+        font-size: 1rem !important;
+        padding: 12px 14px !important;
+    }
+
+    /* ── SECTION TITLES ── */
+    .section-title { font-size: 1.2rem !important; }
+    .section-sub   { font-size: 0.82rem !important; margin-bottom: 16px !important; }
+
+    /* ── GAP entre cards ── */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        margin-bottom: 10px !important;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
