@@ -917,6 +917,30 @@ div[data-testid="stRadio"] > div > label {
         margin-bottom: 10px !important;
     }
 
+    /* ── ADMIN: abas com scroll horizontal ── */
+    [data-testid="stTabBar"] {
+        overflow-x: auto !important;
+        flex-wrap: nowrap !important;
+        -webkit-overflow-scrolling: touch !important;
+        scrollbar-width: none !important;
+        padding-bottom: 2px !important;
+    }
+    [data-testid="stTabBar"]::-webkit-scrollbar { display: none !important; }
+    button[data-testid="stTab"] {
+        white-space: nowrap !important;
+        flex-shrink: 0 !important;
+        font-size: 0.78rem !important;
+        padding: 8px 10px !important;
+    }
+
+    /* ── ADMIN: st.metric legível em 1 coluna ── */
+    [data-testid="stMetricLabel"] p  { font-size: 0.7rem !important; }
+    [data-testid="stMetricValue"] > div { font-size: 1.15rem !important; font-weight: 800 !important; }
+    [data-testid="stMetricDelta"] > div { font-size: 0.7rem !important; }
+
+    /* ── ADMIN: dataframes com scroll horizontal ── */
+    [data-testid="stDataFrame"] { overflow-x: auto !important; }
+
     /* ── RADIO: navegação em grade 2×2 no mobile ── */
     div[data-testid="stRadio"] > div {
         background: #1e3a5f !important;
@@ -1433,11 +1457,23 @@ elif pagina == "Admin":
         num_clientes   = int(df["cliente_nome"].nunique()) if not df.empty else 0
         num_pedidos    = len(df) if not df.empty else 0
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Receita (pago)", brl(faturamento))
-        c2.metric("A Receber",      brl(a_receber_top))
-        c3.metric("Clientes",       num_clientes)
-        c4.metric("Pedidos",           num_pedidos)
+        st.markdown(
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">'
+            f'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:12px 14px;">'
+            f'<div style="font-size:0.68rem;color:#166534;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">Receita (pago)</div>'
+            f'<div style="font-size:1.3rem;font-weight:800;color:#15803d;">{brl(faturamento)}</div></div>'
+            f'<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:12px 14px;">'
+            f'<div style="font-size:0.68rem;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">A Receber</div>'
+            f'<div style="font-size:1.3rem;font-weight:800;color:#d97706;">{brl(a_receber_top)}</div></div>'
+            f'<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 14px;">'
+            f'<div style="font-size:0.68rem;color:#1e40af;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">Clientes</div>'
+            f'<div style="font-size:1.3rem;font-weight:800;color:#1d4ed8;">{num_clientes}</div></div>'
+            f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;">'
+            f'<div style="font-size:0.68rem;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">Pedidos</div>'
+            f'<div style="font-size:1.3rem;font-weight:800;color:#0f172a;">{num_pedidos}</div></div>'
+            '</div>',
+            unsafe_allow_html=True
+        )
 
         st.divider()
 
@@ -1551,11 +1587,27 @@ elif pagina == "Admin":
                     cor_lucro     = "#22c55e" if lucro >= 0 else "#ef4444"
 
                     # ── Cards de métricas ──
-                    cf1, cf2, cf3, cf4 = st.columns(4)
-                    cf1.metric("Receita (pago)", brl(receita))
-                    cf2.metric("Gastos", brl(custo_total))
-                    cf3.metric(lucro_label, brl(abs(lucro)), delta=f"{margem:.1f}% margem", delta_color="normal" if lucro >= 0 else "inverse")
-                    cf4.metric("A Receber", brl(a_receber))
+                    cor_lucro_bg  = "#f0fdf4" if lucro >= 0 else "#fef2f2"
+                    cor_lucro_brd = "#86efac" if lucro >= 0 else "#fca5a5"
+                    cor_lucro_txt = "#15803d" if lucro >= 0 else "#dc2626"
+                    cor_lucro_lbl = "#166534" if lucro >= 0 else "#991b1b"
+                    st.markdown(
+                        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">'
+                        f'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:12px 14px;">'
+                        f'<div style="font-size:0.68rem;color:#166534;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">Receita (pago)</div>'
+                        f'<div style="font-size:1.3rem;font-weight:800;color:#15803d;">{brl(receita)}</div></div>'
+                        f'<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:12px 14px;">'
+                        f'<div style="font-size:0.68rem;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">Gastos</div>'
+                        f'<div style="font-size:1.3rem;font-weight:800;color:#d97706;">{brl(custo_total)}</div></div>'
+                        f'<div style="background:{cor_lucro_bg};border:1px solid {cor_lucro_brd};border-radius:10px;padding:12px 14px;">'
+                        f'<div style="font-size:0.68rem;color:{cor_lucro_lbl};font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">{lucro_label} · {margem:.1f}%</div>'
+                        f'<div style="font-size:1.3rem;font-weight:800;color:{cor_lucro_txt};">{brl(abs(lucro))}</div></div>'
+                        f'<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 14px;">'
+                        f'<div style="font-size:0.68rem;color:#1e40af;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">A Receber</div>'
+                        f'<div style="font-size:1.3rem;font-weight:800;color:#1d4ed8;">{brl(a_receber)}</div></div>'
+                        '</div>',
+                        unsafe_allow_html=True
+                    )
 
                     st.divider()
 
@@ -1861,27 +1913,38 @@ elif pagina == "Admin":
                     origem_val = str(row.get("origem", "site") or "site")
                     origem_badge = (
                         '<span style="background:#fef3c7;color:#92400e;font-size:0.68rem;'
-                        'font-weight:700;padding:2px 7px;border-radius:20px;">manual</span>'
+                        'font-weight:700;padding:2px 7px;border-radius:20px;margin-left:4px;">manual</span>'
                         if origem_val == "manual" else ""
                     )
-                    col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1.6, 2, 0.6, 1.0, 1.4, 1.1, 0.9, 0.9])
-                    col1.markdown(f'{row["cliente_nome"]} {origem_badge}', unsafe_allow_html=True)
-                    col2.write(row["produto_nome"])
-                    col3.write(int(row["quantidade"]))
-                    col4.write(brl(row["valor_unitario"]))
-                    col5.caption(data_txt)
-                    novo_total = col6.number_input(
-                        "Valor", min_value=0.0, step=0.01,
-                        value=float(row["valor_total"]),
-                        key=f"edit_val_{row['id']}",
-                        label_visibility="collapsed", format="%.2f"
-                    )
-                    if novo_total != float(row["valor_total"]):
-                        if col7.button("Salvar", key=f"save_{row['id']}", type="primary"):
-                            editar_venda(int(row["id"]), novo_total)
+                    col_info, col_acoes = st.columns([3, 1])
+                    with col_info:
+                        st.markdown(
+                            f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;'
+                            f'padding:10px 14px;margin-bottom:2px;">'
+                            f'<div style="font-weight:700;color:#0f172a;font-size:0.88rem;">'
+                            f'{row["cliente_nome"]}{origem_badge}</div>'
+                            f'<div style="color:#475569;font-size:0.8rem;margin:2px 0;">'
+                            f'{row["produto_nome"]} · {int(row["quantidade"])}x · {brl(row["valor_unitario"])}</div>'
+                            f'<div style="display:flex;gap:10px;align-items:center;margin-top:4px;flex-wrap:wrap;">'
+                            f'<span style="font-size:0.75rem;color:#64748b;">{data_txt}</span>'
+                            f'<span style="font-size:0.75rem;font-weight:700;color:{status_cor};">{status_txt}</span>'
+                            f'<span style="font-size:0.95rem;font-weight:800;color:#0f172a;">{brl(float(row["valor_total"]))}</span>'
+                            f'</div></div>',
+                            unsafe_allow_html=True
+                        )
+                    with col_acoes:
+                        novo_total = st.number_input(
+                            "Valor", min_value=0.0, step=0.01,
+                            value=float(row["valor_total"]),
+                            key=f"edit_val_{row['id']}",
+                            label_visibility="collapsed", format="%.2f"
+                        )
+                        if novo_total != float(row["valor_total"]):
+                            if st.button("Salvar", key=f"save_{row['id']}", type="primary", use_container_width=True):
+                                editar_venda(int(row["id"]), novo_total)
+                                st.rerun()
+                        else:
+                            st.markdown(f'<div style="color:{status_cor};font-weight:700;font-size:0.78rem;text-align:center;padding:4px 0;">{status_txt}</div>', unsafe_allow_html=True)
+                        if st.button("Excluir", key=f"del_{row['id']}", use_container_width=True):
+                            deletar_pedido(int(row["id"]))
                             st.rerun()
-                    else:
-                        col7.markdown(f'<span style="color:{status_cor};font-weight:700;">{status_txt}</span>', unsafe_allow_html=True)
-                    if col8.button("Excluir", key=f"del_{row['id']}"):
-                        deletar_pedido(int(row["id"]))
-                        st.rerun()
