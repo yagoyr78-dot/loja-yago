@@ -1047,19 +1047,43 @@ div[data-testid="stRadio"] > div > label {
         line-height: 1.2 !important;
     }
 
-    /* ── RADIO dentro de abas/sidebar: estilo claro ── */
-    [data-testid="stTabsContent"] div[data-testid="stRadio"] > div,
-    [data-testid="stSidebar"]     div[data-testid="stRadio"] > div {
+    /* ── RADIO dentro de abas: estilo claro, horizontal ── */
+    [data-testid="stTabsContent"] div[data-testid="stRadio"] > div {
         background: #f1f5f9 !important;
         border-color: #cbd5e1 !important;
         flex-wrap: nowrap !important;
         width: fit-content !important;
     }
-    [data-testid="stTabsContent"] div[data-testid="stRadio"] > div > label,
-    [data-testid="stSidebar"]     div[data-testid="stRadio"] > div > label {
+    [data-testid="stTabsContent"] div[data-testid="stRadio"] > div > label {
         color: #0f172a !important;
         flex: 1 1 auto !important;
         min-width: unset !important;
+    }
+
+    /* ── RADIO sidebar (Pagar agora / Pagar depois): vertical e visivel ── */
+    [data-testid="stSidebar"] div[data-testid="stRadio"] > div {
+        background: #f1f5f9 !important;
+        border-color: #cbd5e1 !important;
+        flex-direction: column !important;
+        flex-wrap: nowrap !important;
+        width: 100% !important;
+        gap: 6px !important;
+        border-radius: 14px !important;
+    }
+    [data-testid="stSidebar"] div[data-testid="stRadio"] > div > label {
+        color: #0f172a !important;
+        background: #ffffff !important;
+        border-radius: 10px !important;
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        min-width: 100% !important;
+        text-align: center !important;
+        padding: 10px 16px !important;
+        box-sizing: border-box !important;
+    }
+    [data-testid="stSidebar"] div[data-testid="stRadio"] > div > label span,
+    [data-testid="stSidebar"] div[data-testid="stRadio"] > div > label p {
+        color: #0f172a !important;
     }
 
     /* ── CARDS DE PEDIDO: grid 2×2 no mobile ── */
