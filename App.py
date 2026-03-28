@@ -1568,13 +1568,16 @@ elif pagina == "Admin":
                     qtd_manual = st.number_input("Quantidade *", min_value=1, step=1, value=1, key="manual_qtd")
 
                 with col_lf2:
+                    # Chave dinâmica: troca ao mudar o produto → Streamlit recria o widget com o novo valor padrão
+                    _k = produto_sel.replace(" ", "_")
                     preco_manual  = st.number_input("Preço de venda (R$) *", min_value=0.01, step=0.50,
-                                                     value=preco_sug, key="manual_preco", format="%.2f")
+                                                     value=preco_sug, key=f"manual_preco_{_k}", format="%.2f")
                     custo_manual  = st.number_input("Custo unitário (R$)", min_value=0.0, step=0.50,
-                                                     value=custo_sug, key="manual_custo", format="%.2f")
+                                                     value=custo_sug, key=f"manual_custo_{_k}", format="%.2f")
                     status_manual = st.radio("Pagamento *", ["Pago", "Pendente"],
                                              horizontal=True, key="manual_status")
-                    data_manual   = st.date_input("Data da venda *", value=date.today(), key="manual_data")
+                    data_manual   = st.date_input("Data da venda *", value=date.today(),
+                                                   format="DD/MM/YYYY", key="manual_data")
 
                 obs_manual = st.text_area("Observação (opcional)",
                                           placeholder="Ex: Venda feita pessoalmente no trabalho",
