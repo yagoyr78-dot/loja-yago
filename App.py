@@ -960,7 +960,27 @@ div[data-testid="stRadio"] > div > label {
     /* ── ADMIN: dataframes com scroll horizontal ── */
     [data-testid="stDataFrame"] { overflow-x: auto !important; }
 
-    /* ── RADIO: navegação em grade 2×2 no mobile ── */
+    /* ── LABELS DE FORMULÁRIO: garantir visibilidade no mobile ── */
+    [data-testid="stWidgetLabel"] p,
+    [data-testid="stWidgetLabel"] label,
+    [data-testid="stTextInput"]   label,
+    [data-testid="stSelectbox"]   label,
+    [data-testid="stNumberInput"] label,
+    [data-testid="stTextArea"]    label,
+    [data-testid="stDateInput"]   label,
+    [data-testid="stRadio"]     > label,
+    [data-testid="stSubheader"],
+    [data-testid="stCaptionContainer"] p {
+        color: #0f172a !important;
+    }
+    /* Inputs: texto digitado também visível */
+    [data-testid="stTextInput"] input,
+    [data-testid="stTextArea"]  textarea,
+    [data-testid="stSelectbox"] [data-baseweb="select"] span {
+        color: #0f172a !important;
+    }
+
+    /* ── RADIO: todos recebem estilo escuro (nav principal) ── */
     div[data-testid="stRadio"] > div {
         background: #1e3a5f !important;
         border-color: #3b82f6 !important;
@@ -980,6 +1000,21 @@ div[data-testid="stRadio"] > div > label {
         box-sizing: border-box !important;
         border-radius: 10px !important;
         line-height: 1.2 !important;
+    }
+
+    /* ── RADIO dentro de abas/sidebar: estilo claro ── */
+    [data-testid="stTabsContent"] div[data-testid="stRadio"] > div,
+    [data-testid="stSidebar"]     div[data-testid="stRadio"] > div {
+        background: #f1f5f9 !important;
+        border-color: #cbd5e1 !important;
+        flex-wrap: nowrap !important;
+        width: fit-content !important;
+    }
+    [data-testid="stTabsContent"] div[data-testid="stRadio"] > div > label,
+    [data-testid="stSidebar"]     div[data-testid="stRadio"] > div > label {
+        color: #0f172a !important;
+        flex: 1 1 auto !important;
+        min-width: unset !important;
     }
 
     /* ── CARDS DE PEDIDO: grid 2×2 no mobile ── */
