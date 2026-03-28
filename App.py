@@ -93,13 +93,14 @@ def render_imagem_produto(caminho, alt="", bg="transparent"):
     b64 = img_base64(caminho)
     if b64:
         img_html = (f'<img src="data:{mime};base64,{b64}" alt="{alt}" '
-                    f'style="max-height:120px;object-fit:contain;">')
+                    f'style="max-height:120px;max-width:100%;object-fit:contain;'
+                    f'filter:drop-shadow(0 6px 12px rgba(0,0,0,0.08));">')
     else:
         img_html = '<div style="height:120px;"></div>'
 
     html = (
-        f'<div style="background:{bg};border-radius:12px;padding:10px;'
-        'display:flex;align-items:center;justify-content:center;height:140px;">'
+        f'<div style="background:{bg};border-radius:14px;padding:12px;'
+        'display:flex;align-items:center;justify-content:center;height:148px;">'
         + img_html + '</div>'
     )
     st.markdown(html, unsafe_allow_html=True)
@@ -470,17 +471,17 @@ st.markdown("""
 
 /* Container Streamlit com border → card estilo delivery */
 [data-testid="stVerticalBlockBorderWrapper"] {
-    border-radius: 16px !important;
+    border-radius: 18px !important;
     border: 1px solid #e8edf2 !important;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.06) !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05) !important;
     background: #ffffff !important;
     overflow: hidden !important;
-    transition: box-shadow 0.22s ease, transform 0.22s ease !important;
+    transition: box-shadow 0.2s ease, transform 0.2s ease !important;
     padding: 0 !important;
 }
 [data-testid="stVerticalBlockBorderWrapper"]:hover {
-    box-shadow: 0 8px 28px rgba(0,0,0,0.13) !important;
-    transform: translateY(-3px) !important;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.11) !important;
+    transform: translateY(-4px) !important;
 }
 
 /* Remove padding excessivo dos blocos internos */
@@ -534,7 +535,7 @@ st.markdown("""
     margin-bottom: 4px;
 }
 .pc-preco {
-    font-size: 1.35rem;
+    font-size: 1.45rem;
     font-weight: 800;
     color: #0f172a;
     letter-spacing: -0.5px;
