@@ -3,6 +3,7 @@ import sqlite3
 from urllib.parse import quote
 import base64
 import io
+from datetime import date
 
 import streamlit as st
 import qrcode
@@ -84,6 +85,14 @@ def img_base64(path):
 # =========================
 # PRODUTOS
 # =========================
+def produto_is_novo(data_criacao_str, dias=7):
+    """Retorna True se o produto foi criado há menos de `dias` dias."""
+    try:
+        criado = date.fromisoformat(data_criacao_str)
+        return (date.today() - criado).days <= dias
+    except Exception:
+        return False
+
 PRODUTOS = [
     {
         "id": 1,
@@ -92,6 +101,7 @@ PRODUTOS = [
         "imagem": caminho_imagem("cappuccino_260ml.png"),
         "descricao": "Bebida pronta para consumo. Gelada, cremosa e deliciosa.",
         "tag": "Bebida",
+        "criado_em": "2026-01-01",
     },
     {
         "id": 2,
@@ -100,6 +110,7 @@ PRODUTOS = [
         "imagem": caminho_imagem("barra_proteina.png"),
         "descricao": "Alta em proteína, ideal para o dia a dia ativo.",
         "tag": "Proteína",
+        "criado_em": "2026-01-01",
     },
     {
         "id": 3,
@@ -108,6 +119,7 @@ PRODUTOS = [
         "imagem": caminho_imagem("cappuccino_po.png"),
         "descricao": "Mistura especial para preparo de cappuccino cremoso.",
         "tag": "Bebida",
+        "criado_em": "2026-01-01",
     },
     {
         "id": 4,
@@ -116,6 +128,16 @@ PRODUTOS = [
         "imagem": caminho_imagem("iogurte_proteico.png"),
         "descricao": "Rico em proteínas, sabor suave e textura cremosa.",
         "tag": "Proteína",
+        "criado_em": "2026-01-01",
+    },
+    {
+        "id": 5,
+        "nome": "Coca Cola",
+        "preco": 6.00,
+        "imagem": caminho_imagem("coca_cola.png"),
+        "descricao": "Refrigerante gelado. Clássico e refrescante.",
+        "tag": "Bebida",
+        "criado_em": "2026-03-27",   # data de hoje — badge NOVO por 7 dias
     },
 ]
 
@@ -165,8 +187,13 @@ if cursor.fetchone()[0] == 0:
         (1, "Cappuccino 260 ml", 7.30),
         (2, "Barra de Proteína",  5.14),
         (4, "Iogurte Proteico",   6.00),
+        (5, "Coca Cola",          4.00),
     ]
     cursor.executemany("INSERT INTO custos (produto_id, produto_nome, custo) VALUES (?, ?, ?)", custos_iniciais)
+    conn.commit()
+else:
+    # Garante que Coca Cola existe mesmo em banco já criado
+    cursor.execute("INSERT OR IGNORE INTO custos (produto_id, produto_nome, custo) VALUES (5, 'Coca Cola', 4.00)")
     conn.commit()
 
 # TABELA DE ESTOQUE
@@ -186,8 +213,13 @@ if cursor.fetchone()[0] == 0:
         (1, "Cappuccino 260 ml",  11),
         (2, "Barra de Proteína",  19),
         (4, "Iogurte Proteico",    3),
+        (5, "Coca Cola",          20),
     ]
     cursor.executemany("INSERT INTO estoque (produto_id, produto_nome, quantidade) VALUES (?, ?, ?)", estoques_iniciais)
+    conn.commit()
+else:
+    # Garante que Coca Cola existe mesmo em banco já criado
+    cursor.execute("INSERT OR IGNORE INTO estoque (produto_id, produto_nome, quantidade) VALUES (5, 'Coca Cola', 20)")
     conn.commit()
 
 import pandas as pd
@@ -586,6 +618,28 @@ st.markdown("""
 
 h1, h2, h3 { color: #0f172a; }
 
+/* Imagem com fundo transparente — sem borda branca */
+[data-testid="stImage"] img {
+    background: transparent !important;
+    mix-blend-mode: multiply;
+}
+
+/* Badge NOVO */
+.badge-novo {
+    display: inline-block;
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    padding: 2px 9px;
+    border-radius: 20px;
+    margin-left: 6px;
+    vertical-align: middle;
+    box-shadow: 0 2px 6px rgba(239,68,68,0.35);
+}
+
 div[data-testid="stRadio"] > label { display: none; }
 div[data-testid="stRadio"] > div {
     display: flex;
@@ -747,6 +801,7 @@ if pagina == "Produtos":
         with cols[i % 2]:
             qtd_estoque = estoque_atual.get(p["id"], None)
             sem_estoque = qtd_estoque is not None and qtd_estoque == 0
+            is_novo     = produto_is_novo(p.get("criado_em", "2000-01-01"))
 
             with st.container(border=True):
                 col_img, col_info = st.columns([1, 1.4])
@@ -754,7 +809,13 @@ if pagina == "Produtos":
                     if os.path.exists(p["imagem"]):
                         st.image(p["imagem"], width=180)
                 with col_info:
-                    st.caption(p["tag"])
+                    # Tag + badge NOVO (se aplicável)
+                    badge_novo = '<span class="badge-novo">NOVO</span>' if is_novo else ""
+                    st.markdown(
+                        f'<span style="font-size:0.75rem;color:#64748b;font-weight:600;text-transform:uppercase;">'
+                        f'{p["tag"]}</span>{badge_novo}',
+                        unsafe_allow_html=True
+                    )
                     st.subheader(p["nome"], divider=False)
                     st.caption(p["descricao"])
                     st.markdown(f"**{brl(p['preco'])}**")
