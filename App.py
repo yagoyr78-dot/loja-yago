@@ -468,66 +468,135 @@ st.markdown("""
     letter-spacing: 0.5px;
 }
 
-/* PRODUCT CARD */
-.produto-card {
-    background: white;
-    border-radius: 20px;
-    overflow: hidden;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-    border: 1px solid #e2e8f0;
-    transition: transform 0.2s, box-shadow 0.2s;
-    margin-bottom: 24px;
+/* ── CARD DE PRODUTO ── */
+
+/* Container Streamlit com border → card estilo delivery */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    border-radius: 16px !important;
+    border: 1px solid #e8edf2 !important;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06) !important;
+    background: #ffffff !important;
+    overflow: hidden !important;
+    transition: box-shadow 0.22s ease, transform 0.22s ease !important;
+    padding: 0 !important;
+}
+[data-testid="stVerticalBlockBorderWrapper"]:hover {
+    box-shadow: 0 8px 28px rgba(0,0,0,0.13) !important;
+    transform: translateY(-3px) !important;
+}
+
+/* Remove padding excessivo dos blocos internos */
+[data-testid="stVerticalBlockBorderWrapper"] > div > div {
+    padding: 0 !important;
+}
+
+/* Info do produto — bloco HTML estático */
+.pc-info {
+    padding: 14px 14px 8px 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
     height: 100%;
 }
-.produto-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 30px rgba(0,0,0,0.12);
-}
-.produto-img-wrap {
-    background: #f1f5f9;
-    padding: 24px;
-    text-align: center;
-    height: 200px;
+.pc-toprow {
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 6px;
+    margin-bottom: 2px;
 }
-.produto-img-wrap img {
-    max-height: 160px;
-    max-width: 100%;
-    object-fit: contain;
+.pc-tag {
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    background: #f1f5f9;
+    padding: 2px 8px;
+    border-radius: 20px;
 }
-.produto-body {
-    padding: 20px;
+.pc-nome {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-bottom: 2px;
 }
-.produto-tag {
+.pc-desc {
+    font-size: 0.78rem;
+    color: #94a3b8;
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-bottom: 4px;
+}
+.pc-preco {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.5px;
+    margin-top: 2px;
+}
+.pc-badge-ok {
     display: inline-block;
-    background: #eff6ff;
-    color: #1d4ed8;
+    background: #dcfce7;
+    color: #166534;
     font-size: 0.7rem;
     font-weight: 700;
     padding: 3px 10px;
-    border-radius: 50px;
-    margin-bottom: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    border-radius: 20px;
 }
-.produto-nome {
-    font-size: 1.1rem;
+.pc-badge-alerta {
+    display: inline-block;
+    background: #fef9c3;
+    color: #854d0e;
+    font-size: 0.7rem;
     font-weight: 700;
-    color: #0f172a;
-    margin-bottom: 6px;
+    padding: 3px 10px;
+    border-radius: 20px;
 }
-.produto-desc {
-    font-size: 0.85rem;
-    color: #64748b;
-    margin-bottom: 14px;
-    line-height: 1.5;
+.pc-badge-esgotado {
+    display: inline-block;
+    background: #fee2e2;
+    color: #991b1b;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
 }
-.produto-preco {
-    font-size: 1.4rem;
-    font-weight: 800;
-    color: #0f172a;
+
+/* Botão primário — estilo delivery */
+[data-testid="stBaseButton-primary"] button,
+button[kind="primary"],
+[data-testid="stBaseButton-primary"] {
+    background: #ef4444 !important;
+    border: none !important;
+    border-radius: 10px !important;
+    font-weight: 700 !important;
+    font-size: 0.85rem !important;
+    letter-spacing: 0.2px !important;
+    transition: background 0.18s !important;
+}
+[data-testid="stBaseButton-primary"]:hover {
+    background: #dc2626 !important;
+}
+
+/* Number input compacto */
+[data-testid="stNumberInput"] {
+    margin-top: 0 !important;
+}
+[data-testid="stNumberInput"] input {
+    text-align: center !important;
+    font-weight: 700 !important;
+}
+/* Área abaixo do card (qty + botão) */
+.pc-actions {
+    padding: 0 10px 10px 10px;
 }
 
 /* SIDEBAR CART */
@@ -824,37 +893,52 @@ if pagina == "Produtos":
             sem_estoque = qtd_estoque is not None and qtd_estoque == 0
             is_novo     = produto_is_novo(p.get("criado_em", "2000-01-01"))
 
+            # Badge de estoque em HTML
+            if sem_estoque:
+                badge_est = '<span class="pc-badge-esgotado">Esgotado</span>'
+            elif qtd_estoque is not None and qtd_estoque <= 3:
+                badge_est = f'<span class="pc-badge-alerta">Últimas {qtd_estoque} un.</span>'
+            elif qtd_estoque is not None:
+                badge_est = f'<span class="pc-badge-ok">Em estoque: {qtd_estoque}</span>'
+            else:
+                badge_est = ''
+
+            badge_novo = '<span class="badge-novo">NOVO</span>' if is_novo else ""
+
             with st.container(border=True):
+                # ── Linha superior: imagem | info (tudo HTML estático) ──
                 col_img, col_info = st.columns([1, 1.4])
                 with col_img:
                     render_imagem_produto(p["imagem"], p["nome"])
                 with col_info:
-                    # Tag + badge NOVO (se aplicável)
-                    badge_novo = '<span class="badge-novo">NOVO</span>' if is_novo else ""
-                    st.markdown(
-                        f'<span style="font-size:0.75rem;color:#64748b;font-weight:600;text-transform:uppercase;">'
-                        f'{p["tag"]}</span>{badge_novo}',
-                        unsafe_allow_html=True
-                    )
-                    st.subheader(p["nome"], divider=False)
-                    st.caption(p["descricao"])
-                    st.markdown(f"**{brl(p['preco'])}**")
-                    if sem_estoque:
-                        st.error("Esgotado", icon="🚫")
-                    elif qtd_estoque is not None and qtd_estoque <= 3:
-                        st.warning(f"Últimas {qtd_estoque} unidades")
-                    elif qtd_estoque is not None:
-                        st.success(f"Em estoque: {qtd_estoque}")
+                    st.markdown(f"""
+                    <div class="pc-info">
+                        <div class="pc-toprow">
+                            <span class="pc-tag">{p['tag']}</span>
+                            {badge_novo}
+                        </div>
+                        <div class="pc-nome">{p['nome']}</div>
+                        <div class="pc-desc">{p['descricao']}</div>
+                        <div class="pc-preco">{brl(p['preco'])}</div>
+                        <div style="margin-top:4px;">{badge_est}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-                col_qtd, col_btn = st.columns([1, 2])
+                # ── Linha inferior: quantidade + botão ──
+                col_qtd, col_btn = st.columns([1, 2.5])
                 with col_qtd:
                     max_qtd = qtd_estoque if qtd_estoque is not None else 99
-                    qtd = st.number_input("Qtd", min_value=1, max_value=max(1, max_qtd), step=1, value=1, key=f"qtd_{p['id']}", label_visibility="collapsed", disabled=sem_estoque)
+                    qtd = st.number_input(
+                        "Qtd", min_value=1, max_value=max(1, max_qtd),
+                        step=1, value=1, key=f"qtd_{p['id']}",
+                        label_visibility="collapsed", disabled=sem_estoque
+                    )
                 with col_btn:
                     if sem_estoque:
                         st.button("Esgotado", key=f"btn_{p['id']}", use_container_width=True, disabled=True)
                     else:
-                        if st.button("Adicionar ao carrinho", key=f"btn_{p['id']}", use_container_width=True, type="primary"):
+                        if st.button("Adicionar ao carrinho", key=f"btn_{p['id']}",
+                                     use_container_width=True, type="primary"):
                             adicionar(p, int(qtd))
                             st.success(f"{p['nome']} adicionado!")
                             st.rerun()
