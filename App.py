@@ -194,7 +194,10 @@ CREATE TABLE IF NOT EXISTS pedidos (
 )
 """)
 # Migração: adiciona colunas se não existirem (banco já existente)
-for col, default in [("forma_pagamento", "'agora'"), ("pago", "1"), ("custo_unitario", "0"), ("data_venda", "''")]:
+for col, default in [
+    ("forma_pagamento", "'agora'"), ("pago", "1"), ("custo_unitario", "0"),
+    ("data_venda", "''"), ("origem", "'site'"), ("observacao", "''"),
+]:
     try:
         cursor.execute(f"ALTER TABLE pedidos ADD COLUMN {col} TEXT DEFAULT {default}")
         conn.commit()
@@ -349,8 +352,8 @@ def salvar_pedido(nome, itens, forma_pagamento):
         cursor.execute("""
             INSERT INTO pedidos
                 (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total,
-                 forma_pagamento, pago, custo_unitario, data_venda)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 forma_pagamento, pago, custo_unitario, data_venda, origem, observacao)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'site', '')
         """, (nome, item["nome"], int(item["quantidade"]), float(item["preco"]),
               float(total), forma_pagamento, int(pago), float(custo_unit), data_agora))
         # Abate estoque apenas para produtos com controle de estoque
@@ -359,6 +362,27 @@ def salvar_pedido(nome, itens, forma_pagamento):
                 "UPDATE estoque SET quantidade = MAX(0, quantidade - ?) WHERE produto_id = ?",
                 (int(item["quantidade"]), int(item["id"]))
             )
+    conn.commit()
+
+def salvar_venda_manual(cliente_nome, produto_nome, produto_id,
+                         quantidade, valor_unitario, custo_unitario,
+                         pago, data_venda, observacao):
+    valor_total = quantidade * valor_unitario
+    forma_pagamento = "agora" if pago else "depois"
+    estoque_db = carregar_estoque()
+    cursor.execute("""
+        INSERT INTO pedidos
+            (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total,
+             forma_pagamento, pago, custo_unitario, data_venda, origem, observacao)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?)
+    """, (cliente_nome, produto_nome, int(quantidade), float(valor_unitario),
+          float(valor_total), forma_pagamento, int(pago), float(custo_unitario),
+          data_venda, observacao))
+    if produto_id is not None and produto_id in estoque_db:
+        cursor.execute(
+            "UPDATE estoque SET quantidade = MAX(0, quantidade - ?) WHERE produto_id = ?",
+            (int(quantidade), int(produto_id))
+        )
     conn.commit()
 
 def gerar_whatsapp(nome, itens, forma_pagamento="agora"):
@@ -1271,7 +1295,9 @@ elif pagina == "Admin":
 
         st.divider()
 
-        aba_visao, aba_financeiro, aba_cobranca, aba_estoque, aba_precos, aba_pedidos = st.tabs(["Visao Geral", "Financeiro", "Cobrar Clientes", "Estoque", "Preços", "Todos os Pedidos"])
+        aba_visao, aba_financeiro, aba_cobranca, aba_estoque, aba_precos, aba_lancar, aba_pedidos = st.tabs(
+            ["Visao Geral", "Financeiro", "Cobrar Clientes", "Estoque", "Preços", "Lançar Venda", "Todos os Pedidos"]
+        )
 
         if True:
 
@@ -1510,6 +1536,98 @@ elif pagina == "Admin":
                             st.success(f"{p['nome']}: preço atualizado para R$ {novo_preco:.2f}")
                             st.rerun()
 
+            # ── ABA: LANÇAR VENDA ──
+            with aba_lancar:
+                st.subheader("Lançar Venda Manual")
+                st.caption("Registre uma venda feita fora do site. Ela afeta estoque, financeiro, cobrança e histórico.")
+
+                precos_lancar = carregar_precos()
+                custos_lancar = carregar_custos()
+
+                opcoes_produto = [p["nome"] for p in PRODUTOS] + ["Produto personalizado"]
+
+                col_lf1, col_lf2 = st.columns(2)
+                with col_lf1:
+                    cliente_manual = st.text_input("Nome do cliente *", key="manual_cliente",
+                                                    placeholder="Ex: João Silva")
+                    produto_sel = st.selectbox("Produto *", opcoes_produto, key="manual_produto")
+
+                    if produto_sel == "Produto personalizado":
+                        produto_nome_manual = st.text_input("Nome do produto *", key="manual_produto_nome",
+                                                             placeholder="Ex: Água mineral")
+                        produto_id_manual   = None
+                        preco_sug           = 1.0
+                        custo_sug           = 0.0
+                    else:
+                        produto_obj         = next((p for p in PRODUTOS if p["nome"] == produto_sel), None)
+                        produto_nome_manual = produto_sel
+                        produto_id_manual   = produto_obj["id"] if produto_obj else None
+                        preco_sug           = float(precos_lancar.get(produto_id_manual, produto_obj["preco"] if produto_obj else 1.0))
+                        custo_sug           = float(custos_lancar.get(produto_id_manual, 0.0))
+
+                    qtd_manual = st.number_input("Quantidade *", min_value=1, step=1, value=1, key="manual_qtd")
+
+                with col_lf2:
+                    preco_manual  = st.number_input("Preço de venda (R$) *", min_value=0.01, step=0.50,
+                                                     value=preco_sug, key="manual_preco", format="%.2f")
+                    custo_manual  = st.number_input("Custo unitário (R$)", min_value=0.0, step=0.50,
+                                                     value=custo_sug, key="manual_custo", format="%.2f")
+                    status_manual = st.radio("Pagamento *", ["Pago", "Pendente"],
+                                             horizontal=True, key="manual_status")
+                    data_manual   = st.date_input("Data da venda *", value=date.today(), key="manual_data")
+
+                obs_manual = st.text_area("Observação (opcional)",
+                                          placeholder="Ex: Venda feita pessoalmente no trabalho",
+                                          key="manual_obs", height=70)
+
+                # Preview
+                total_prev  = int(qtd_manual) * float(preco_manual)
+                custo_prev  = int(qtd_manual) * float(custo_manual)
+                lucro_prev  = total_prev - custo_prev
+                cor_lucro_p = "#22c55e" if lucro_prev >= 0 else "#ef4444"
+                cor_status  = "#22c55e" if status_manual == "Pago" else "#f59e0b"
+                st.markdown(
+                    '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin:10px 0;">'
+                    '<div style="font-weight:700;color:#0f172a;margin-bottom:10px;">Resumo da venda</div>'
+                    '<div style="display:flex;gap:24px;flex-wrap:wrap;">'
+                    f'<div><div style="color:#64748b;font-size:0.78rem;">Total</div><b style="color:#0f172a;">{brl(total_prev)}</b></div>'
+                    f'<div><div style="color:#64748b;font-size:0.78rem;">Custo total</div><b style="color:#f59e0b;">{brl(custo_prev)}</b></div>'
+                    f'<div><div style="color:#64748b;font-size:0.78rem;">Lucro estimado</div><b style="color:{cor_lucro_p};">{brl(lucro_prev)}</b></div>'
+                    f'<div><div style="color:#64748b;font-size:0.78rem;">Status</div><b style="color:{cor_status};">{status_manual}</b></div>'
+                    '</div></div>',
+                    unsafe_allow_html=True
+                )
+
+                if st.button("Registrar venda", type="primary", use_container_width=True, key="btn_lancar_venda"):
+                    erros_lancar = []
+                    nome_cli = cliente_manual.strip()
+                    if len(nome_cli) < 2:
+                        erros_lancar.append("Nome do cliente deve ter pelo menos 2 caracteres.")
+                    if produto_sel == "Produto personalizado" and not produto_nome_manual.strip():
+                        erros_lancar.append("Informe o nome do produto personalizado.")
+                    if erros_lancar:
+                        for e in erros_lancar:
+                            st.error(e)
+                    else:
+                        data_str  = data_manual.strftime("%d/%m/%Y %H:%M")
+                        pago_int  = 1 if status_manual == "Pago" else 0
+                        salvar_venda_manual(
+                            cliente_nome    = nome_cli,
+                            produto_nome    = produto_nome_manual.strip(),
+                            produto_id      = produto_id_manual,
+                            quantidade      = int(qtd_manual),
+                            valor_unitario  = float(preco_manual),
+                            custo_unitario  = float(custo_manual),
+                            pago            = pago_int,
+                            data_venda      = data_str,
+                            observacao      = obs_manual.strip(),
+                        )
+                        st.success(
+                            f"Venda registrada: {produto_nome_manual} x{qtd_manual} "
+                            f"para {nome_cli} — {brl(total_prev)} ({status_manual})"
+                        )
+                        st.rerun()
+
             with aba_pedidos:
                 if df.empty:
                     st.info("Nenhum pedido registrado ainda.")
@@ -1528,8 +1646,14 @@ elif pagina == "Admin":
                     status_cor = "#22c55e" if pago_col else "#f59e0b"
                     status_txt = "Pago" if pago_col else "Pendente"
                     data_txt   = str(row["data_venda"])[:16] if "data_venda" in row and row["data_venda"] else "—"
+                    origem_val = str(row.get("origem", "site") or "site")
+                    origem_badge = (
+                        '<span style="background:#fef3c7;color:#92400e;font-size:0.68rem;'
+                        'font-weight:700;padding:2px 7px;border-radius:20px;">manual</span>'
+                        if origem_val == "manual" else ""
+                    )
                     col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1.6, 2, 0.6, 1.0, 1.4, 1.1, 0.9, 0.9])
-                    col1.write(row["cliente_nome"])
+                    col1.markdown(f'{row["cliente_nome"]} {origem_badge}', unsafe_allow_html=True)
                     col2.write(row["produto_nome"])
                     col3.write(int(row["quantidade"]))
                     col4.write(brl(row["valor_unitario"]))
