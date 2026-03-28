@@ -94,13 +94,17 @@ def render_imagem_produto(caminho, alt="", bg="transparent", img_h=120):
     if b64:
         img_html = (f'<img src="data:{mime};base64,{b64}" alt="{alt}" '
                     f'style="max-height:{img_h}px;max-width:100%;object-fit:contain;'
-                    f'filter:drop-shadow(0 6px 12px rgba(0,0,0,0.08));">')
+                    f'filter:drop-shadow(0 4px 10px rgba(0,0,0,0.07));'
+                    f'transition:transform 0.25s ease-out;"'
+                    f'onmouseover="this.style.transform=\'scale(1.04)\'"'
+                    f'onmouseout="this.style.transform=\'scale(1)\'">')
     else:
         img_html = f'<div style="height:{img_h}px;"></div>'
 
     html = (
         f'<div style="background:{bg};border-radius:14px;padding:12px;'
-        'display:flex;align-items:center;justify-content:center;height:148px;">'
+        'display:flex;align-items:center;justify-content:center;height:150px;'
+        'overflow:hidden;">'
         + img_html + '</div>'
     )
     st.markdown(html, unsafe_allow_html=True)
@@ -469,19 +473,19 @@ st.markdown("""
 
 /* ── CARD DE PRODUTO ── */
 
-/* Container Streamlit com border → card estilo delivery */
+/* ── CARD ── */
 [data-testid="stVerticalBlockBorderWrapper"] {
     border-radius: 18px !important;
-    border: 1px solid #e8edf2 !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05) !important;
+    border: 1px solid #eaeef3 !important;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.05) !important;
     background: #ffffff !important;
     overflow: hidden !important;
-    transition: box-shadow 0.2s ease, transform 0.2s ease !important;
+    transition: box-shadow 0.25s ease-out, transform 0.25s ease-out !important;
     padding: 0 !important;
 }
 [data-testid="stVerticalBlockBorderWrapper"]:hover {
-    box-shadow: 0 10px 30px rgba(0,0,0,0.11) !important;
-    transform: translateY(-4px) !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.10) !important;
+    transform: translateY(-3px) !important;
 }
 
 /* Remove padding excessivo dos blocos internos */
@@ -489,87 +493,74 @@ st.markdown("""
     padding: 0 !important;
 }
 
-/* Info do produto — bloco HTML estático */
+/* ── INFO DO PRODUTO ── */
 .pc-info {
-    padding: 14px 14px 8px 4px;
+    padding: 16px 14px 10px 6px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
     height: 100%;
 }
 .pc-toprow {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 2px;
+    margin-bottom: 3px;
 }
 .pc-tag {
-    font-size: 0.65rem;
+    font-size: 0.62rem;
     font-weight: 700;
     color: #64748b;
     text-transform: uppercase;
-    letter-spacing: 0.7px;
+    letter-spacing: 0.8px;
     background: #f1f5f9;
-    padding: 2px 8px;
+    padding: 2px 9px;
     border-radius: 20px;
 }
 .pc-nome {
-    font-size: 1.05rem;
+    font-size: 1.08rem;
     font-weight: 800;
     color: #0f172a;
-    line-height: 1.3;
+    line-height: 1.28;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    margin-bottom: 2px;
+    margin-bottom: 1px;
+    letter-spacing: -0.2px;
 }
 .pc-desc {
-    font-size: 0.78rem;
-    color: #94a3b8;
+    font-size: 0.76rem;
+    color: #a0aec0;
     line-height: 1.45;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
-    margin-bottom: 4px;
+    margin-bottom: 5px;
 }
 .pc-preco {
-    font-size: 1.45rem;
+    font-size: 1.42rem;
     font-weight: 800;
-    color: #0f172a;
-    letter-spacing: -0.5px;
-    margin-top: 2px;
-}
-.pc-badge-ok {
-    display: inline-block;
-    background: #dcfce7;
-    color: #166534;
-    font-size: 0.7rem;
-    font-weight: 700;
-    padding: 3px 10px;
-    border-radius: 20px;
-}
-.pc-badge-alerta {
-    display: inline-block;
-    background: #fef9c3;
-    color: #854d0e;
-    font-size: 0.7rem;
-    font-weight: 700;
-    padding: 3px 10px;
-    border-radius: 20px;
-}
-.pc-badge-esgotado {
-    display: inline-block;
-    background: #fee2e2;
-    color: #991b1b;
-    font-size: 0.7rem;
-    font-weight: 700;
-    padding: 3px 10px;
-    border-radius: 20px;
+    color: #111827;
+    letter-spacing: -0.6px;
+    margin-top: 1px;
 }
 
-/* Botão primário — estilo delivery */
+/* ── BADGES DE ESTOQUE ── */
+.pc-badge-ok, .pc-badge-alerta, .pc-badge-esgotado {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 3px 11px;
+    border-radius: 99px;
+    letter-spacing: 0.2px;
+}
+.pc-badge-ok       { background: #dcfce7; color: #15803d; }
+.pc-badge-alerta   { background: #fef9c3; color: #92400e; }
+.pc-badge-esgotado { background: #fee2e2; color: #991b1b; }
+
+/* ── BOTÃO PRIMÁRIO ── */
 [data-testid="stBaseButton-primary"] button,
 button[kind="primary"],
 [data-testid="stBaseButton-primary"] {
@@ -579,10 +570,11 @@ button[kind="primary"],
     font-weight: 700 !important;
     font-size: 0.85rem !important;
     letter-spacing: 0.2px !important;
-    transition: background 0.18s !important;
+    transition: background 0.2s ease, transform 0.2s ease !important;
 }
 [data-testid="stBaseButton-primary"]:hover {
     background: #dc2626 !important;
+    transform: scale(1.02) !important;
 }
 
 /* Number input compacto */
