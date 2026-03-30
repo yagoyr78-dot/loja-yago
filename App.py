@@ -1,12 +1,10 @@
 import os
-import sqlite3
+import psycopg2
 from urllib.parse import quote
 import base64
 import io
-from datetime import date
 
 import streamlit as st
-import streamlit.components.v1 as components
 import qrcode
 from PIL import Image
 
@@ -16,7 +14,6 @@ from PIL import Image
 st.set_page_config(page_title="Loja Yago", layout="wide", page_icon="🛒")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH  = os.path.join(BASE_DIR, "loja.db")
 
 WHATSAPP_NUMERO  = st.secrets["WHATSAPP_NUMERO"]
 EMAIL_CONTATO    = st.secrets["EMAIL_CONTATO"]
@@ -82,56 +79,11 @@ def img_base64(path):
             return base64.b64encode(f.read()).decode()
     return ""
 
-def render_imagem_produto(caminho, alt="", bg="transparent", img_h=120):
-    # Detecta o formato real do arquivo (ignora extensão — ex: PNG salvo como .jpg)
-    try:
-        with Image.open(caminho) as _img:
-            mime = "image/png" if _img.format == "PNG" else "image/jpeg"
-    except Exception:
-        ext  = caminho.rsplit(".", 1)[-1].lower()
-        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
-
-    b64 = img_base64(caminho)
-    if b64:
-        img_html = (f'<img src="data:{mime};base64,{b64}" alt="{alt}" '
-                    f'style="max-height:{img_h}px;max-width:100%;object-fit:contain;'
-                    f'filter:drop-shadow(0 4px 10px rgba(0,0,0,0.07));'
-                    f'transition:transform 0.25s ease-out;"'
-                    f'onmouseover="this.style.transform=\'scale(1.04)\'"'
-                    f'onmouseout="this.style.transform=\'scale(1)\'">')
-    else:
-        img_html = f'<div style="height:{img_h}px;"></div>'
-
-    html = (
-        f'<div style="background:{bg};border-radius:14px;padding:12px;'
-        'display:flex;align-items:center;justify-content:center;height:150px;'
-        'overflow:hidden;">'
-        + img_html + '</div>'
-    )
-    st.markdown(html, unsafe_allow_html=True)
-
 
 # =========================
 # PRODUTOS
 # =========================
-def produto_is_novo(data_criacao_str, dias=7):
-    """Retorna True se o produto foi criado há menos de `dias` dias."""
-    try:
-        criado = date.fromisoformat(data_criacao_str)
-        return (date.today() - criado).days <= dias
-    except Exception:
-        return False
-
-_PRODUTOS_BASE = [
-    {
-        "id": 5,
-        "nome": "Coca Cola",
-        "preco": 6.00,
-        "imagem": caminho_imagem("Coca_Cola_Branco-removebg-preview.png"),
-        "descricao": "Refrigerante gelado. Clássico e refrescante.",
-        "tag": "Bebida",
-        "criado_em": "2026-03-27",
-    },
+PRODUTOS = [
     {
         "id": 1,
         "nome": "Cappuccino 260 ml",
@@ -139,7 +91,6 @@ _PRODUTOS_BASE = [
         "imagem": caminho_imagem("cappuccino_260ml.png"),
         "descricao": "Bebida pronta para consumo. Gelada, cremosa e deliciosa.",
         "tag": "Bebida",
-        "criado_em": "2026-01-01",
     },
     {
         "id": 2,
@@ -148,7 +99,6 @@ _PRODUTOS_BASE = [
         "imagem": caminho_imagem("barra_proteina.png"),
         "descricao": "Alta em proteína, ideal para o dia a dia ativo.",
         "tag": "Proteína",
-        "criado_em": "2026-01-01",
     },
     {
         "id": 3,
@@ -157,7 +107,6 @@ _PRODUTOS_BASE = [
         "imagem": caminho_imagem("cappuccino_po.png"),
         "descricao": "Mistura especial para preparo de cappuccino cremoso.",
         "tag": "Bebida",
-        "criado_em": "2026-01-01",
     },
     {
         "id": 4,
@@ -166,127 +115,99 @@ _PRODUTOS_BASE = [
         "imagem": caminho_imagem("iogurte_proteico.png"),
         "descricao": "Rico em proteínas, sabor suave e textura cremosa.",
         "tag": "Proteína",
-        "criado_em": "2026-01-01",
     },
 ]
 
 
 # =========================
-# BANCO DE DADOS
+# BANCO DE DADOS (Supabase / PostgreSQL)
 # =========================
-def conectar():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+@st.cache_resource
+def get_db():
+    return psycopg2.connect(st.secrets["DATABASE_URL"])
 
-conn   = conectar()
-cursor = conn.cursor()
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS pedidos (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    cliente_nome     TEXT NOT NULL,
-    produto_nome     TEXT NOT NULL,
-    quantidade       INTEGER NOT NULL,
-    valor_unitario   REAL NOT NULL,
-    valor_total      REAL NOT NULL,
-    forma_pagamento  TEXT NOT NULL DEFAULT 'agora',
-    pago             INTEGER NOT NULL DEFAULT 1,
-    custo_unitario   REAL NOT NULL DEFAULT 0,
-    data_venda       TEXT DEFAULT (datetime('now','localtime'))
-)
-""")
-# Migração: adiciona colunas se não existirem (banco já existente)
-for col, default in [
-    ("forma_pagamento", "'agora'"), ("pago", "1"), ("custo_unitario", "0"),
-    ("data_venda", "''"), ("origem", "'site'"), ("observacao", "''"),
-]:
+def get_conn():
+    conn = get_db()
     try:
-        cursor.execute(f"ALTER TABLE pedidos ADD COLUMN {col} TEXT DEFAULT {default}")
-        conn.commit()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
     except Exception:
-        pass
+        get_db.clear()
+        conn = get_db()
+    return conn
 
-# TABELA DE CUSTOS
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS custos (
-    produto_id   INTEGER PRIMARY KEY,
-    produto_nome TEXT NOT NULL,
-    custo        REAL NOT NULL DEFAULT 0
-)
-""")
-conn.commit()
-cursor.execute("SELECT COUNT(*) FROM custos")
-if cursor.fetchone()[0] == 0:
-    custos_iniciais = [
-        (1, "Cappuccino 260 ml", 7.30),
-        (2, "Barra de Proteína",  5.14),
-        (4, "Iogurte Proteico",   6.00),
-        (5, "Coca Cola",          4.00),
-    ]
-    cursor.executemany("INSERT INTO custos (produto_id, produto_nome, custo) VALUES (?, ?, ?)", custos_iniciais)
-    conn.commit()
-else:
-    # Garante que Coca Cola existe mesmo em banco já criado
-    cursor.execute("INSERT OR IGNORE INTO custos (produto_id, produto_nome, custo) VALUES (5, 'Coca Cola', 4.00)")
-    conn.commit()
-
-# TABELA DE ESTOQUE
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS estoque (
-    produto_id   INTEGER PRIMARY KEY,
-    produto_nome TEXT NOT NULL,
-    quantidade   INTEGER NOT NULL DEFAULT 0
-)
-""")
-conn.commit()
-
-# Estoque inicial — só insere se a tabela estiver vazia
-cursor.execute("SELECT COUNT(*) FROM estoque")
-if cursor.fetchone()[0] == 0:
-    estoques_iniciais = [
-        (1, "Cappuccino 260 ml",  11),
-        (2, "Barra de Proteína",  19),
-        (4, "Iogurte Proteico",    3),
-        (5, "Coca Cola",          20),
-    ]
-    cursor.executemany("INSERT INTO estoque (produto_id, produto_nome, quantidade) VALUES (?, ?, ?)", estoques_iniciais)
-    conn.commit()
-else:
-    # Garante que Coca Cola existe mesmo em banco já criado
-    cursor.execute("INSERT OR IGNORE INTO estoque (produto_id, produto_nome, quantidade) VALUES (5, 'Coca Cola', 20)")
-    conn.commit()
-
-# TABELA DE PREÇOS (editável pelo admin)
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS precos (
-    produto_id   INTEGER PRIMARY KEY,
-    produto_nome TEXT NOT NULL,
-    preco        REAL NOT NULL
-)
-""")
-conn.commit()
-# Popula com preços base se vazia
-cursor.execute("SELECT COUNT(*) FROM precos")
-if cursor.fetchone()[0] == 0:
-    for _p in _PRODUTOS_BASE:
-        cursor.execute(
-            "INSERT OR IGNORE INTO precos (produto_id, produto_nome, preco) VALUES (?, ?, ?)",
-            (_p["id"], _p["nome"], _p["preco"])
+def init_db():
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS pedidos (
+            id               SERIAL PRIMARY KEY,
+            cliente_nome     TEXT NOT NULL,
+            produto_nome     TEXT NOT NULL,
+            quantidade       INTEGER NOT NULL,
+            valor_unitario   REAL NOT NULL,
+            valor_total      REAL NOT NULL,
+            forma_pagamento  TEXT NOT NULL DEFAULT 'agora',
+            pago             INTEGER NOT NULL DEFAULT 1,
+            custo_unitario   REAL NOT NULL DEFAULT 0,
+            data_venda       TEXT DEFAULT ''
         )
-    conn.commit()
-else:
-    # Garante que todos os produtos base existem mesmo em banco já criado
-    for _p in _PRODUTOS_BASE:
-        cursor.execute(
-            "INSERT OR IGNORE INTO precos (produto_id, produto_nome, preco) VALUES (?, ?, ?)",
-            (_p["id"], _p["nome"], _p["preco"])
+        """)
+        for col, default in [
+            ("forma_pagamento", "'agora'"),
+            ("pago",            "1"),
+            ("custo_unitario",  "0"),
+            ("data_venda",      "''"),
+        ]:
+            cur.execute(
+                f"ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS {col} TEXT DEFAULT {default}"
+            )
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS custos (
+            produto_id   INTEGER PRIMARY KEY,
+            produto_nome TEXT NOT NULL,
+            custo        REAL NOT NULL DEFAULT 0
         )
+        """)
+        cur.execute("SELECT COUNT(*) FROM custos")
+        if cur.fetchone()[0] == 0:
+            cur.executemany(
+                "INSERT INTO custos (produto_id, produto_nome, custo) VALUES (%s, %s, %s)",
+                [
+                    (1, "Cappuccino 260 ml", 7.30),
+                    (2, "Barra de Proteína",  5.14),
+                    (4, "Iogurte Proteico",   6.00),
+                ],
+            )
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS estoque (
+            produto_id   INTEGER PRIMARY KEY,
+            produto_nome TEXT NOT NULL,
+            quantidade   INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+        cur.execute("SELECT COUNT(*) FROM estoque")
+        if cur.fetchone()[0] == 0:
+            cur.executemany(
+                "INSERT INTO estoque (produto_id, produto_nome, quantidade) VALUES (%s, %s, %s)",
+                [
+                    (1, "Cappuccino 260 ml", 11),
+                    (2, "Barra de Proteína",  19),
+                    (4, "Iogurte Proteico",    3),
+                ],
+            )
     conn.commit()
+
+init_db()
 
 import pandas as pd
 
 def carregar_vendas():
+    conn = get_conn()
     df = pd.read_sql_query("SELECT * FROM pedidos ORDER BY id DESC", conn)
     if not df.empty:
-        # Garante tipos corretos independente de como a coluna foi criada (TEXT vs INTEGER)
         df["pago"]           = pd.to_numeric(df["pago"],           errors="coerce").fillna(1).astype(int)
         df["quantidade"]     = pd.to_numeric(df["quantidade"],     errors="coerce").fillna(0).astype(int)
         df["valor_total"]    = pd.to_numeric(df["valor_total"],    errors="coerce").fillna(0.0).astype(float)
@@ -295,49 +216,69 @@ def carregar_vendas():
     return df
 
 def deletar_pedido(pedido_id):
-    cursor.execute("DELETE FROM pedidos WHERE id = ?", (pedido_id,))
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM pedidos WHERE id = %s", (pedido_id,))
     conn.commit()
 
 def limpar_pedidos():
-    cursor.execute("DELETE FROM pedidos")
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM pedidos")
     conn.commit()
 
 def marcar_pago(pedido_id):
-    cursor.execute("UPDATE pedidos SET pago = 1 WHERE id = ?", (int(pedido_id),))
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("UPDATE pedidos SET pago = 1 WHERE id = %s", (int(pedido_id),))
     conn.commit()
 
 def marcar_pago_cliente(cliente_nome):
-    # Usa CAST para comparar corretamente mesmo se pago estiver salvo como TEXT
-    cursor.execute("UPDATE pedidos SET pago = 1 WHERE cliente_nome = ? AND CAST(pago AS INTEGER) = 0", (cliente_nome,))
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE pedidos SET pago = 1 WHERE cliente_nome = %s AND CAST(pago AS INTEGER) = 0",
+            (cliente_nome,),
+        )
     conn.commit()
 
 def carregar_custos():
-    return {row[0]: row[1] for row in cursor.execute("SELECT produto_id, custo FROM custos").fetchall()}
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("SELECT produto_id, custo FROM custos")
+        return {row[0]: row[1] for row in cur.fetchall()}
 
 def definir_custo(produto_id, custo):
-    cursor.execute("UPDATE custos SET custo = ? WHERE produto_id = ?", (custo, produto_id))
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("UPDATE custos SET custo = %s WHERE produto_id = %s", (custo, produto_id))
     conn.commit()
 
 def editar_venda(pedido_id, novo_valor_total):
-    cursor.execute("UPDATE pedidos SET valor_total = ? WHERE id = ?", (novo_valor_total, pedido_id))
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("UPDATE pedidos SET valor_total = %s WHERE id = %s", (novo_valor_total, pedido_id))
     conn.commit()
 
 def carregar_estoque():
-    return {row[0]: row[1] for row in cursor.execute("SELECT produto_id, quantidade FROM estoque").fetchall()}
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("SELECT produto_id, quantidade FROM estoque")
+        return {row[0]: row[1] for row in cur.fetchall()}
 
 def atualizar_estoque(produto_id, delta):
-    cursor.execute("UPDATE estoque SET quantidade = MAX(0, quantidade + ?) WHERE produto_id = ?", (delta, produto_id))
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE estoque SET quantidade = GREATEST(0, quantidade + %s) WHERE produto_id = %s",
+            (delta, produto_id),
+        )
     conn.commit()
 
 def definir_estoque(produto_id, quantidade):
-    cursor.execute("UPDATE estoque SET quantidade = ? WHERE produto_id = ?", (quantidade, produto_id))
-    conn.commit()
-
-def carregar_precos():
-    return {row[0]: row[1] for row in cursor.execute("SELECT produto_id, preco FROM precos").fetchall()}
-
-def definir_preco(produto_id, preco):
-    cursor.execute("UPDATE precos SET preco = ? WHERE produto_id = ?", (float(preco), int(produto_id)))
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("UPDATE estoque SET quantidade = %s WHERE produto_id = %s", (quantidade, produto_id))
     conn.commit()
 
 def salvar_pedido(nome, itens, forma_pagamento):
@@ -346,43 +287,23 @@ def salvar_pedido(nome, itens, forma_pagamento):
     custos_db  = carregar_custos()
     estoque_db = carregar_estoque()
     data_agora = datetime.now().strftime("%d/%m/%Y %H:%M")
-    for item in itens:
-        total      = item["quantidade"] * item["preco"]
-        custo_unit = custos_db.get(item["id"], 0.0)
-        cursor.execute("""
-            INSERT INTO pedidos
-                (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total,
-                 forma_pagamento, pago, custo_unitario, data_venda, origem, observacao)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'site', '')
-        """, (nome, item["nome"], int(item["quantidade"]), float(item["preco"]),
-              float(total), forma_pagamento, int(pago), float(custo_unit), data_agora))
-        # Abate estoque apenas para produtos com controle de estoque
-        if item["id"] in estoque_db:
-            cursor.execute(
-                "UPDATE estoque SET quantidade = MAX(0, quantidade - ?) WHERE produto_id = ?",
-                (int(item["quantidade"]), int(item["id"]))
-            )
-    conn.commit()
-
-def salvar_venda_manual(cliente_nome, produto_nome, produto_id,
-                         quantidade, valor_unitario, custo_unitario,
-                         pago, data_venda, observacao):
-    valor_total = quantidade * valor_unitario
-    forma_pagamento = "agora" if pago else "depois"
-    estoque_db = carregar_estoque()
-    cursor.execute("""
-        INSERT INTO pedidos
-            (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total,
-             forma_pagamento, pago, custo_unitario, data_venda, origem, observacao)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?)
-    """, (cliente_nome, produto_nome, int(quantidade), float(valor_unitario),
-          float(valor_total), forma_pagamento, int(pago), float(custo_unitario),
-          data_venda, observacao))
-    if produto_id is not None and produto_id in estoque_db:
-        cursor.execute(
-            "UPDATE estoque SET quantidade = MAX(0, quantidade - ?) WHERE produto_id = ?",
-            (int(quantidade), int(produto_id))
-        )
+    conn = get_conn()
+    with conn.cursor() as cur:
+        for item in itens:
+            total      = item["quantidade"] * item["preco"]
+            custo_unit = custos_db.get(item["id"], 0.0)
+            cur.execute("""
+                INSERT INTO pedidos
+                    (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total,
+                     forma_pagamento, pago, custo_unitario, data_venda)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (nome, item["nome"], int(item["quantidade"]), float(item["preco"]),
+                  float(total), forma_pagamento, int(pago), float(custo_unit), data_agora))
+            if item["id"] in estoque_db:
+                cur.execute(
+                    "UPDATE estoque SET quantidade = GREATEST(0, quantidade - %s) WHERE produto_id = %s",
+                    (int(item["quantidade"]), int(item["id"])),
+                )
     conn.commit()
 
 def gerar_whatsapp(nome, itens, forma_pagamento="agora"):
@@ -398,11 +319,6 @@ def gerar_whatsapp(nome, itens, forma_pagamento="agora"):
     return f"https://wa.me/{WHATSAPP_NUMERO}?text={quote(texto)}"
 
 
-# Computa PRODUTOS com preços do banco (atualizado a cada rerun)
-_precos_db = carregar_precos()
-PRODUTOS = [{**p, "preco": _precos_db.get(p["id"], p["preco"])} for p in _PRODUTOS_BASE]
-
-
 # =========================
 # CARRINHO (session state)
 # =========================
@@ -414,11 +330,6 @@ if "pedido_enviado" not in st.session_state:
     st.session_state.pedido_enviado = False
 if "admin_logado" not in st.session_state:
     st.session_state.admin_logado = False
-if "nome_editando" not in st.session_state:
-    st.session_state.nome_editando = not bool(st.query_params.get("nome", "").strip())
-
-# Nome do cliente disponível em todo o app (sidebar + Meus Pedidos)
-nome_persistido = st.query_params.get("nome", "").strip()
 
 def adicionar(produto, qtd):
     for item in st.session_state.carrinho:
@@ -540,165 +451,72 @@ st.markdown("""
     letter-spacing: 0.5px;
 }
 
-/* ── CARD DE PRODUTO ── */
-
-/* ── CARD ── */
-[data-testid="stVerticalBlockBorderWrapper"] {
-    border-radius: 18px !important;
-    border: 1px solid #eaeef3 !important;
-    box-shadow: 0 1px 6px rgba(0,0,0,0.05) !important;
-    background: #ffffff !important;
-    overflow: hidden !important;
-    transition: box-shadow 0.25s ease-out, transform 0.25s ease-out !important;
-    padding: 0 !important;
-}
-[data-testid="stVerticalBlockBorderWrapper"]:hover {
-    box-shadow: 0 8px 24px rgba(0,0,0,0.10) !important;
-    transform: translateY(-3px) !important;
-}
-
-/* Remove padding excessivo dos blocos internos */
-[data-testid="stVerticalBlockBorderWrapper"] > div > div {
-    padding: 0 !important;
-}
-
-/* ── INFO DO PRODUTO ── */
-.pc-info {
-    padding: 16px 14px 10px 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
+/* PRODUCT CARD */
+.produto-card {
+    background: white;
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    border: 1px solid #e2e8f0;
+    transition: transform 0.2s, box-shadow 0.2s;
+    margin-bottom: 24px;
     height: 100%;
 }
-.pc-toprow {
+.produto-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+}
+.produto-img-wrap {
+    background: #f1f5f9;
+    padding: 24px;
+    text-align: center;
+    height: 200px;
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 3px;
+    justify-content: center;
 }
-.pc-tag {
-    font-size: 0.62rem;
+.produto-img-wrap img {
+    max-height: 160px;
+    max-width: 100%;
+    object-fit: contain;
+}
+.produto-body {
+    padding: 20px;
+}
+.produto-tag {
+    display: inline-block;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-size: 0.7rem;
     font-weight: 700;
-    color: #64748b;
+    padding: 3px 10px;
+    border-radius: 50px;
+    margin-bottom: 8px;
     text-transform: uppercase;
-    letter-spacing: 0.8px;
-    background: #f1f5f9;
-    padding: 2px 9px;
-    border-radius: 20px;
+    letter-spacing: 0.5px;
 }
-.pc-nome {
-    font-size: 1.08rem;
+.produto-nome {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 6px;
+}
+.produto-desc {
+    font-size: 0.85rem;
+    color: #64748b;
+    margin-bottom: 14px;
+    line-height: 1.5;
+}
+.produto-preco {
+    font-size: 1.4rem;
     font-weight: 800;
     color: #0f172a;
-    line-height: 1.28;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    margin-bottom: 1px;
-    letter-spacing: -0.2px;
-}
-.pc-desc {
-    font-size: 0.76rem;
-    color: #7c8fa1;
-    line-height: 1.45;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    margin-bottom: 5px;
-}
-.pc-preco {
-    font-size: 1.42rem;
-    font-weight: 800;
-    color: #111827;
-    letter-spacing: -0.6px;
-    margin-top: 1px;
-}
-
-/* ── BADGES DE ESTOQUE ── */
-.pc-badge-ok, .pc-badge-alerta, .pc-badge-esgotado {
-    display: inline-block;
-    font-size: 0.68rem;
-    font-weight: 700;
-    padding: 3px 11px;
-    border-radius: 99px;
-    letter-spacing: 0.2px;
-}
-.pc-badge-ok       { background: #dcfce7; color: #15803d; }
-.pc-badge-alerta   { background: #fef9c3; color: #92400e; }
-.pc-badge-esgotado { background: #fee2e2; color: #991b1b; }
-
-/* ── BOTÃO PRIMÁRIO ── */
-[data-testid="stBaseButton-primary"] button,
-button[kind="primary"],
-[data-testid="stBaseButton-primary"] {
-    background: #ef4444 !important;
-    border: none !important;
-    border-radius: 10px !important;
-    font-weight: 700 !important;
-    font-size: 0.85rem !important;
-    letter-spacing: 0.2px !important;
-    transition: background 0.2s ease, transform 0.2s ease !important;
-}
-[data-testid="stBaseButton-primary"]:hover {
-    background: #dc2626 !important;
-    transform: scale(1.02) !important;
-}
-
-/* Number input — moderno e integrado */
-[data-testid="stNumberInput"] {
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-}
-[data-testid="stNumberInput"] input {
-    text-align: center !important;
-    font-weight: 700 !important;
-    font-size: 0.95rem !important;
-    border-radius: 10px !important;
-    border-color: #e2e8f0 !important;
-    background: #f8fafc !important;
-    color: #0f172a !important;
-    padding: 6px 4px !important;
-}
-[data-testid="stNumberInput"] button {
-    border-radius: 8px !important;
-    border-color: #e2e8f0 !important;
-    background: #f1f5f9 !important;
-    color: #475569 !important;
-    font-weight: 700 !important;
-}
-/* Área abaixo do card (qty + botão) */
-.pc-actions {
-    padding: 0 10px 10px 10px;
 }
 
 /* SIDEBAR CART */
 [data-testid="stSidebar"] {
     background: white;
     border-right: 1px solid #e2e8f0;
-}
-
-/* Campo "Seu nome" — destaque obrigatório */
-[data-testid="stSidebar"] [data-testid="stTextInput"] input {
-    background: #f8fafc !important;
-    border: 2px solid #cbd5e1 !important;
-    border-radius: 10px !important;
-    font-size: 0.95rem !important;
-    font-weight: 500 !important;
-    color: #0f172a !important;
-    padding: 10px 14px !important;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
-}
-[data-testid="stSidebar"] [data-testid="stTextInput"] input::placeholder {
-    color: #94a3b8 !important;
-    font-weight: 400 !important;
-}
-[data-testid="stSidebar"] [data-testid="stTextInput"] input:focus {
-    border-color: #3b82f6 !important;
-    box-shadow: 0 0 0 3px rgba(59,130,246,0.15) !important;
-    background: #ffffff !important;
-    outline: none !important;
 }
 .cart-titulo {
     font-size: 1.2rem;
@@ -808,24 +626,6 @@ button[kind="primary"],
 
 h1, h2, h3 { color: #0f172a; }
 
-/* Imagens dos produtos são renderizadas via HTML/base64 — sem regras conflitantes */
-
-/* Badge NOVO */
-.badge-novo {
-    display: inline-block;
-    background: linear-gradient(135deg, #ef4444, #dc2626);
-    color: white;
-    font-size: 0.68rem;
-    font-weight: 800;
-    letter-spacing: 0.8px;
-    text-transform: uppercase;
-    padding: 2px 9px;
-    border-radius: 20px;
-    margin-left: 6px;
-    vertical-align: middle;
-    box-shadow: 0 2px 6px rgba(239,68,68,0.35);
-}
-
 div[data-testid="stRadio"] > label { display: none; }
 div[data-testid="stRadio"] > div {
     display: flex;
@@ -841,260 +641,6 @@ div[data-testid="stRadio"] > div > label {
     padding: 6px 20px !important;
     font-weight: 600 !important;
     font-size: 0.9rem !important;
-}
-
-/* ═══════════════════════════════════
-   RESPONSIVIDADE MOBILE (≤ 640px)
-   ═══════════════════════════════════ */
-@media (max-width: 640px) {
-
-    /* Página: reduz padding lateral */
-    .block-container {
-        padding-left: 0.75rem !important;
-        padding-right: 0.75rem !important;
-        padding-top: 2rem !important;
-    }
-
-    /* Hero: compacta banner */
-    .hero {
-        padding: 26px 18px !important;
-        margin-bottom: 20px !important;
-    }
-    .hero h1 { font-size: 1.45rem !important; }
-    .hero p  { font-size: 0.88rem !important; }
-
-    /* ── GRADE EXTERNA: cards passam para 1 coluna ── */
-    [data-testid="stHorizontalBlock"] {
-        flex-wrap: wrap !important;
-    }
-    [data-testid="stColumn"] {
-        min-width: 100% !important;
-        width: 100% !important;
-        flex: 1 1 100% !important;
-    }
-
-    /* Exceção: colunas DENTRO do card (img|info e qty|btn) ficam lado a lado */
-    [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stColumn"] {
-        min-width: 0 !important;
-        width: auto !important;
-        flex: 1 1 auto !important;
-    }
-
-    /* ── CARD: tipografia e espaçamento ── */
-    .pc-info  { padding: 12px 10px 8px 4px !important; gap: 3px !important; }
-    .pc-nome  { font-size: 0.92rem !important; }
-    .pc-desc  { font-size: 0.71rem !important; }
-    .pc-preco { font-size: 1.18rem !important; }
-
-    /* ── BOTÃO: touch target confortável ── */
-    [data-testid="stBaseButton-primary"] {
-        min-height: 46px !important;
-        font-size: 0.9rem !important;
-    }
-
-    /* ── NUMBER INPUT: maior para toque ── */
-    [data-testid="stNumberInput"] input {
-        min-height: 42px !important;
-        font-size: 1rem !important;
-    }
-    [data-testid="stNumberInput"] button {
-        min-height: 42px !important;
-    }
-
-    /* ── CAMPO NOME: confortável no celular ── */
-    [data-testid="stSidebar"] [data-testid="stTextInput"] input {
-        min-height: 50px !important;
-        font-size: 1rem !important;
-        padding: 12px 14px !important;
-    }
-
-    /* ── SECTION TITLES ── */
-    .section-title { font-size: 1.2rem !important; }
-    .section-sub   { font-size: 0.82rem !important; margin-bottom: 16px !important; }
-
-    /* ── GAP entre cards ── */
-    [data-testid="stVerticalBlockBorderWrapper"] {
-        margin-bottom: 10px !important;
-    }
-
-    /* ── ADMIN: abas — scroll + contraste no mobile ── */
-    [data-testid="stTabBar"] {
-        overflow-x: auto !important;
-        flex-wrap: nowrap !important;
-        -webkit-overflow-scrolling: touch !important;
-        scrollbar-width: none !important;
-        background: #1e3a5f !important;
-        border-radius: 10px !important;
-        padding: 4px !important;
-        gap: 2px !important;
-        border-bottom: none !important;
-    }
-    [data-testid="stTabBar"]::-webkit-scrollbar { display: none !important; }
-
-    /* Aba inativa: texto claro sobre fundo escuro */
-    button[data-testid="stTab"] {
-        white-space: nowrap !important;
-        flex-shrink: 0 !important;
-        font-size: 0.78rem !important;
-        font-weight: 600 !important;
-        padding: 8px 12px !important;
-        color: #93c5fd !important;
-        background: transparent !important;
-        border: none !important;
-        border-radius: 8px !important;
-        border-bottom: none !important;
-    }
-
-    /* Aba ativa: destaque branco */
-    button[data-testid="stTab"][aria-selected="true"] {
-        background: #ffffff !important;
-        color: #0f172a !important;
-        font-weight: 700 !important;
-    }
-
-    /* ── ADMIN: st.metric legível em 1 coluna ── */
-    [data-testid="stMetricLabel"] p  { font-size: 0.7rem !important; }
-    [data-testid="stMetricValue"] > div { font-size: 1.15rem !important; font-weight: 800 !important; }
-    [data-testid="stMetricDelta"] > div { font-size: 0.7rem !important; }
-
-    /* ── ADMIN: dataframes com scroll horizontal ── */
-    [data-testid="stDataFrame"] { overflow-x: auto !important; }
-
-    /* ── LABELS DE FORMULÁRIO: visibilidade completa no mobile ── */
-
-    /* Contêiner do label: nunca escondido */
-    [data-testid="stWidgetLabel"] {
-        display: block !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-        margin-bottom: 4px !important;
-    }
-
-    /* Todo elemento filho do label: cor escura, visível */
-    [data-testid="stWidgetLabel"],
-    [data-testid="stWidgetLabel"] *,
-    [data-testid="stWidgetLabel"] p,
-    [data-testid="stWidgetLabel"] label,
-    [data-testid="stWidgetLabel"] span,
-    [data-testid="stWidgetLabel"] div {
-        color: #1e293b !important;
-        opacity: 1 !important;
-        visibility: visible !important;
-        font-size: 0.85rem !important;
-        font-weight: 600 !important;
-    }
-
-    /* Cobre variações de estrutura HTML do Streamlit */
-    [data-testid="stTextInput"]   > label,
-    [data-testid="stTextInput"]   > div > label,
-    [data-testid="stSelectbox"]   > label,
-    [data-testid="stSelectbox"]   > div > label,
-    [data-testid="stNumberInput"] > label,
-    [data-testid="stNumberInput"] > div > label,
-    [data-testid="stTextArea"]    > label,
-    [data-testid="stTextArea"]    > div > label,
-    [data-testid="stDateInput"]   > label,
-    [data-testid="stDateInput"]   > div > label,
-    [data-testid="stRadio"]       > label,
-    [data-testid="stRadio"]       > div > label {
-        color: #1e293b !important;
-        opacity: 1 !important;
-        visibility: visible !important;
-        display: block !important;
-        font-size: 0.85rem !important;
-        font-weight: 600 !important;
-        margin-bottom: 4px !important;
-    }
-
-    /* Texto digitado nos inputs */
-    [data-testid="stTextInput"]   input,
-    [data-testid="stNumberInput"] input,
-    [data-testid="stTextArea"]    textarea {
-        color: #0f172a !important;
-        background: #ffffff !important;
-        opacity: 1 !important;
-    }
-
-    /* Selectbox: texto da opção selecionada */
-    [data-baseweb="select"] span,
-    [data-baseweb="select"] div {
-        color: #0f172a !important;
-    }
-
-    /* Caption e subheaders */
-    [data-testid="stCaptionContainer"] p,
-    [data-testid="stSubheader"] { color: #334155 !important; }
-
-    /* ── RADIO: todos recebem estilo escuro (nav principal) ── */
-    div[data-testid="stRadio"] > div {
-        background: #1e3a5f !important;
-        border-color: #3b82f6 !important;
-        width: 100% !important;
-        flex-wrap: wrap !important;
-        gap: 4px !important;
-        padding: 4px !important;
-        border-radius: 14px !important;
-    }
-    div[data-testid="stRadio"] > div > label {
-        color: #ffffff !important;
-        padding: 11px 8px !important;
-        font-size: 0.85rem !important;
-        flex: 1 1 calc(50% - 8px) !important;
-        min-width: calc(50% - 8px) !important;
-        text-align: center !important;
-        box-sizing: border-box !important;
-        border-radius: 10px !important;
-        line-height: 1.2 !important;
-    }
-
-    /* ── RADIO dentro de abas: estilo claro, horizontal ── */
-    [data-testid="stTabsContent"] div[data-testid="stRadio"] > div {
-        background: #f1f5f9 !important;
-        border-color: #cbd5e1 !important;
-        flex-wrap: nowrap !important;
-        width: fit-content !important;
-    }
-    [data-testid="stTabsContent"] div[data-testid="stRadio"] > div > label {
-        color: #0f172a !important;
-        flex: 1 1 auto !important;
-        min-width: unset !important;
-    }
-
-    /* ── RADIO sidebar (Pagar agora / Pagar depois): vertical e visivel ── */
-    [data-testid="stSidebar"] div[data-testid="stRadio"] > div {
-        background: #f1f5f9 !important;
-        border-color: #cbd5e1 !important;
-        flex-direction: column !important;
-        flex-wrap: nowrap !important;
-        width: 100% !important;
-        gap: 6px !important;
-        border-radius: 14px !important;
-    }
-    [data-testid="stSidebar"] div[data-testid="stRadio"] > div > label {
-        color: #0f172a !important;
-        background: #ffffff !important;
-        border-radius: 10px !important;
-        flex: 1 1 100% !important;
-        width: 100% !important;
-        min-width: 100% !important;
-        text-align: center !important;
-        padding: 10px 16px !important;
-        box-sizing: border-box !important;
-    }
-    [data-testid="stSidebar"] div[data-testid="stRadio"] > div > label span,
-    [data-testid="stSidebar"] div[data-testid="stRadio"] > div > label p {
-        color: #0f172a !important;
-    }
-
-    /* ── CARDS DE PEDIDO: grid 2×2 no mobile ── */
-    .pedido-row {
-        display: grid !important;
-        grid-template-columns: 1fr 1fr !important;
-        gap: 10px 16px !important;
-    }
-    .pedido-card {
-        padding: 12px 14px !important;
-    }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -1121,22 +667,6 @@ st.markdown(f"""
 # SIDEBAR - CARRINHO
 # =========================
 with st.sidebar:
-    # ── JS: ao abrir a página, lê localStorage e injeta o nome na URL (1 reload) ──
-    components.html("""
-    <script>
-    (function() {
-        try {
-            var saved = localStorage.getItem('loja_yago_nome');
-            var params = new URLSearchParams(window.parent.location.search);
-            if (saved && !params.has('nome')) {
-                params.set('nome', saved);
-                window.parent.location.search = params.toString();
-            }
-        } catch(e) {}
-    })();
-    </script>
-    """, height=0)
-
     st.markdown('<div class="cart-titulo">Meu Carrinho</div>', unsafe_allow_html=True)
 
     if st.session_state.carrinho:
@@ -1161,62 +691,7 @@ with st.sidebar:
         </div>
         """, unsafe_allow_html=True)
 
-        # ── Campo nome controlado ──
-        if nome_persistido and not st.session_state.nome_editando:
-            # Estado travado: exibe nome salvo
-            st.markdown(
-                f'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;'
-                f'padding:10px 14px;margin-bottom:6px;">'
-                f'<div style="font-size:0.7rem;font-weight:700;color:#166534;text-transform:uppercase;'
-                f'letter-spacing:0.5px;margin-bottom:3px;">Identificado como</div>'
-                f'<div style="font-weight:800;color:#0f172a;font-size:1rem;">👤 {nome_persistido}</div>'
-                f'</div>',
-                unsafe_allow_html=True
-            )
-            if st.button("✏️ Alterar nome", key="btn_alterar_nome", use_container_width=True):
-                st.session_state.nome_editando = True
-                st.rerun()
-            nome = nome_persistido
-        else:
-            # Estado de edição: campo livre + botão salvar
-            label_txt = "Alterar nome" if nome_persistido else 'Seu nome <span style="color:#ef4444;">*</span>'
-            st.markdown(
-                f'<p style="font-size:0.85rem;font-weight:700;color:#0f172a;margin-bottom:4px;">{label_txt}</p>',
-                unsafe_allow_html=True
-            )
-            nome_input = st.text_input(
-                "Nome", value=nome_persistido,
-                placeholder="Digite seu nome completo",
-                label_visibility="collapsed", key="nome_input_field"
-            )
-            if nome_persistido:
-                col_s, col_c = st.columns([3, 1])
-            else:
-                col_s = st.container()
-                col_c = None
-            with col_s:
-                salvar_nome = st.button("Salvar nome", key="btn_salvar_nome",
-                                        use_container_width=True, type="primary")
-            if col_c:
-                with col_c:
-                    if st.button("✕", key="btn_cancelar_nome", use_container_width=True):
-                        st.session_state.nome_editando = False
-                        st.rerun()
-            if salvar_nome:
-                nome_limpo = (nome_input or "").strip()
-                if len(nome_limpo) < 2:
-                    st.warning("Nome deve ter pelo menos 2 caracteres.")
-                elif not any(c.isalpha() for c in nome_limpo):
-                    st.warning("Nome inválido. Use letras.")
-                else:
-                    st.query_params["nome"] = nome_limpo
-                    st.session_state.nome_editando = False
-                    components.html(
-                        f"<script>try{{localStorage.setItem('loja_yago_nome',{repr(nome_limpo)})}}catch(e){{}}</script>",
-                        height=0
-                    )
-                    st.rerun()
-            nome = (nome_input or "").strip()
+        nome = st.text_input("Seu nome", placeholder="Digite seu nome completo")
 
         forma = st.radio(
             "Forma de pagamento",
@@ -1286,7 +761,7 @@ with st.sidebar:
 # =========================
 # MENU
 # =========================
-pagina = st.radio("", ["Produtos", "Meus Pedidos", "Contato", "Admin"], horizontal=True)
+pagina = st.radio("", ["Produtos", "Contato", "Admin"], horizontal=True)
 
 
 # =========================
@@ -1312,195 +787,36 @@ if pagina == "Produtos":
         with cols[i % 2]:
             qtd_estoque = estoque_atual.get(p["id"], None)
             sem_estoque = qtd_estoque is not None and qtd_estoque == 0
-            is_novo     = produto_is_novo(p.get("criado_em", "2000-01-01"))
-
-            # Badge de estoque em HTML
-            if sem_estoque:
-                badge_est = '<span class="pc-badge-esgotado">Esgotado</span>'
-            elif qtd_estoque is not None and qtd_estoque <= 3:
-                badge_est = f'<span class="pc-badge-alerta">Últimas {qtd_estoque} un.</span>'
-            elif qtd_estoque is not None:
-                badge_est = f'<span class="pc-badge-ok">Em estoque: {qtd_estoque}</span>'
-            else:
-                badge_est = ''
-
-            badge_novo = '<span class="badge-novo">NOVO</span>' if is_novo else ""
 
             with st.container(border=True):
-                # ── Linha superior: imagem | info (tudo HTML estático) ──
                 col_img, col_info = st.columns([1, 1.4])
                 with col_img:
-                    img_bg = "#f1f3f5" if p["id"] == 5 else "transparent"
-                    # Ajuste fino de tamanho por produto para equilíbrio visual
-                    img_h = {
-                        5: 138,   # Coca-Cola — maior
-                        4: 132,   # Iogurte Proteico — maior
-                        2: 108,   # Barra de Proteína — equilibrada
-                        3: 114,   # Cappuccino em Pó — contido
-                        1: 122,   # Cappuccino 260ml — padrão
-                    }.get(p["id"], 120)
-                    render_imagem_produto(p["imagem"], p["nome"], bg=img_bg, img_h=img_h)
+                    if os.path.exists(p["imagem"]):
+                        st.image(p["imagem"], width=180)
                 with col_info:
-                    info_html = (
-                        '<div class="pc-info">'
-                        '<div class="pc-toprow">'
-                        f'<span class="pc-tag">{p["tag"]}</span>{badge_novo}'
-                        '</div>'
-                        f'<div class="pc-nome">{p["nome"]}</div>'
-                        f'<div class="pc-desc">{p["descricao"]}</div>'
-                        f'<div class="pc-preco">{brl(p["preco"])}</div>'
-                        f'<div style="margin-top:4px;">{badge_est}</div>'
-                        '</div>'
-                    )
-                    st.markdown(info_html, unsafe_allow_html=True)
+                    st.caption(p["tag"])
+                    st.subheader(p["nome"], divider=False)
+                    st.caption(p["descricao"])
+                    st.markdown(f"**{brl(p['preco'])}**")
+                    if sem_estoque:
+                        st.error("Esgotado", icon="🚫")
+                    elif qtd_estoque is not None and qtd_estoque <= 3:
+                        st.warning(f"Últimas {qtd_estoque} unidades")
+                    elif qtd_estoque is not None:
+                        st.success(f"Em estoque: {qtd_estoque}")
 
-                # ── Linha inferior: quantidade + botão ──
-                col_qtd, col_btn = st.columns([1, 2.5])
+                col_qtd, col_btn = st.columns([1, 2])
                 with col_qtd:
                     max_qtd = qtd_estoque if qtd_estoque is not None else 99
-                    qtd = st.number_input(
-                        "Qtd", min_value=1, max_value=max(1, max_qtd),
-                        step=1, value=1, key=f"qtd_{p['id']}",
-                        label_visibility="collapsed", disabled=sem_estoque
-                    )
+                    qtd = st.number_input("Qtd", min_value=1, max_value=max(1, max_qtd), step=1, value=1, key=f"qtd_{p['id']}", label_visibility="collapsed", disabled=sem_estoque)
                 with col_btn:
                     if sem_estoque:
                         st.button("Esgotado", key=f"btn_{p['id']}", use_container_width=True, disabled=True)
                     else:
-                        if st.button("Adicionar ao carrinho", key=f"btn_{p['id']}",
-                                     use_container_width=True, type="primary"):
+                        if st.button("Adicionar ao carrinho", key=f"btn_{p['id']}", use_container_width=True, type="primary"):
                             adicionar(p, int(qtd))
                             st.success(f"{p['nome']} adicionado!")
                             st.rerun()
-
-
-# =========================
-# PÁGINA MEUS PEDIDOS
-# =========================
-elif pagina == "Meus Pedidos":
-
-    st.markdown('<div class="section-title">Meus Pedidos</div>', unsafe_allow_html=True)
-
-    if not nome_persistido:
-        st.markdown("""
-        <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:14px;
-        padding:24px;text-align:center;margin-top:16px;">
-            <div style="font-size:2rem;margin-bottom:10px;">👤</div>
-            <div style="font-weight:700;font-size:1rem;color:#92400e;margin-bottom:6px;">
-                Identifique-se para ver seus pedidos
-            </div>
-            <div style="color:#78350f;font-size:0.88rem;">
-                Adicione seu nome no carrinho (coluna à esquerda) para acessar seu histórico de compras.
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        df_todos = carregar_vendas()
-
-        # Filtra apenas pedidos do cliente identificado (comparação case-insensitive)
-        if df_todos.empty:
-            df_cli = pd.DataFrame()
-        else:
-            df_cli = df_todos[
-                df_todos["cliente_nome"].str.strip().str.lower() == nome_persistido.lower()
-            ].copy()
-
-        if df_cli.empty:
-            st.markdown(f"""
-            <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:14px;
-            padding:24px;text-align:center;margin-top:16px;">
-                <div style="font-size:2rem;margin-bottom:10px;">📦</div>
-                <div style="font-weight:700;font-size:1rem;color:#0369a1;margin-bottom:6px;">
-                    Olá, {nome_persistido}!
-                </div>
-                <div style="color:#0c4a6e;font-size:0.88rem;">
-                    Você ainda não tem pedidos registrados.
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            # ── Resumo do cliente ──
-            total_pedidos  = len(df_cli)
-            total_pago     = df_cli[df_cli["pago"] == 1]["valor_total"].sum()
-            total_pendente = df_cli[df_cli["pago"] == 0]["valor_total"].sum()
-
-            st.markdown(
-                f'<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;'
-                f'padding:14px 18px;margin-bottom:20px;font-size:0.95rem;color:#0c4a6e;">'
-                f'Olá, <b>{nome_persistido}</b>! Aqui estão todas as suas compras.'
-                f'</div>',
-                unsafe_allow_html=True
-            )
-
-            st.markdown(
-                f'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;">'
-                f'<div style="flex:1;min-width:90px;background:#f8fafc;border:1px solid #e2e8f0;'
-                f'border-radius:10px;padding:12px 14px;">'
-                f'<div style="font-size:0.72rem;color:#64748b;font-weight:600;margin-bottom:4px;">Pedidos</div>'
-                f'<div style="font-size:1.4rem;font-weight:800;color:#0f172a;">{total_pedidos}</div>'
-                f'</div>'
-                f'<div style="flex:1;min-width:90px;background:#f0fdf4;border:1px solid #86efac;'
-                f'border-radius:10px;padding:12px 14px;">'
-                f'<div style="font-size:0.72rem;color:#166534;font-weight:600;margin-bottom:4px;">Total pago</div>'
-                f'<div style="font-size:1.4rem;font-weight:800;color:#15803d;">{brl(total_pago)}</div>'
-                f'</div>'
-                f'<div style="flex:1;min-width:90px;background:#fffbeb;border:1px solid #fcd34d;'
-                f'border-radius:10px;padding:12px 14px;">'
-                f'<div style="font-size:0.72rem;color:#92400e;font-weight:600;margin-bottom:4px;">Pendente</div>'
-                f'<div style="font-size:1.4rem;font-weight:800;color:#d97706;">{brl(total_pendente)}</div>'
-                f'</div>'
-                f'</div>',
-                unsafe_allow_html=True
-            )
-
-            st.divider()
-
-            # ── Lista de pedidos (mais recente primeiro) ──
-            for _, row in df_cli.iterrows():
-                pago_val   = int(row["pago"]) if "pago" in row else 1
-                data_txt   = str(row["data_venda"])[:16] if row.get("data_venda") else "—"
-                status_cor = "#22c55e" if pago_val else "#f59e0b"
-                status_txt = "✅ Pago" if pago_val else "⏳ Pendente"
-                borda_cor  = "#86efac" if pago_val else "#fcd34d"
-
-                st.markdown(
-                    f'<div style="background:white;border:1px solid {borda_cor};'
-                    f'border-left:5px solid {borda_cor};border-radius:12px;'
-                    f'padding:14px 16px;margin-bottom:10px;">'
-                    f'<div style="display:flex;justify-content:space-between;'
-                    f'align-items:flex-start;margin-bottom:10px;gap:8px;">'
-                    f'<span style="font-weight:700;color:#0f172a;font-size:0.95rem;line-height:1.3;">'
-                    f'{row["produto_nome"]}</span>'
-                    f'<span style="font-weight:700;color:{status_cor};font-size:0.82rem;'
-                    f'white-space:nowrap;">{status_txt}</span>'
-                    f'</div>'
-                    f'<table style="width:100%;border-collapse:collapse;">'
-                    f'<tr>'
-                    f'<td style="color:#64748b;font-size:0.78rem;padding:3px 0;">Quantidade</td>'
-                    f'<td style="color:#64748b;font-size:0.78rem;padding:3px 0;">Valor unitário</td>'
-                    f'</tr>'
-                    f'<tr>'
-                    f'<td style="font-weight:700;color:#0f172a;padding-bottom:8px;">'
-                    f'{int(row["quantidade"])}x</td>'
-                    f'<td style="font-weight:700;color:#0f172a;padding-bottom:8px;">'
-                    f'{brl(row["valor_unitario"])}</td>'
-                    f'</tr>'
-                    f'<tr style="border-top:1px solid #e2e8f0;">'
-                    f'<td style="font-weight:700;color:#64748b;font-size:0.78rem;padding-top:8px;">'
-                    f'Total</td>'
-                    f'<td style="font-weight:700;color:#64748b;font-size:0.78rem;padding-top:8px;">'
-                    f'Data</td>'
-                    f'</tr>'
-                    f'<tr>'
-                    f'<td style="font-weight:800;color:#0f172a;font-size:1.05rem;">'
-                    f'{brl(row["valor_total"])}</td>'
-                    f'<td style="font-weight:600;color:#475569;font-size:0.85rem;">'
-                    f'{data_txt}</td>'
-                    f'</tr>'
-                    f'</table>'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
 
 
 # =========================
@@ -1580,497 +896,246 @@ elif pagina == "Admin":
         num_clientes   = int(df["cliente_nome"].nunique()) if not df.empty else 0
         num_pedidos    = len(df) if not df.empty else 0
 
-        st.markdown(
-            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">'
-            f'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:12px 14px;">'
-            f'<div style="font-size:0.68rem;color:#166534;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">Receita (pago)</div>'
-            f'<div style="font-size:1.3rem;font-weight:800;color:#15803d;">{brl(faturamento)}</div></div>'
-            f'<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:12px 14px;">'
-            f'<div style="font-size:0.68rem;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">A Receber</div>'
-            f'<div style="font-size:1.3rem;font-weight:800;color:#d97706;">{brl(a_receber_top)}</div></div>'
-            f'<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 14px;">'
-            f'<div style="font-size:0.68rem;color:#1e40af;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">Clientes</div>'
-            f'<div style="font-size:1.3rem;font-weight:800;color:#1d4ed8;">{num_clientes}</div></div>'
-            f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;">'
-            f'<div style="font-size:0.68rem;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">Pedidos</div>'
-            f'<div style="font-size:1.3rem;font-weight:800;color:#0f172a;">{num_pedidos}</div></div>'
-            '</div>',
-            unsafe_allow_html=True
-        )
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Receita (pago)", brl(faturamento))
+        c2.metric("A Receber",      brl(a_receber_top))
+        c3.metric("Clientes",       num_clientes)
+        c4.metric("Pedidos",        num_pedidos)
 
         st.divider()
 
-        aba_visao, aba_financeiro, aba_cobranca, aba_estoque, aba_precos, aba_lancar, aba_pedidos = st.tabs(
-            ["Visao Geral", "Financeiro", "Cobrar Clientes", "Estoque", "Preços", "Lançar Venda", "Todos os Pedidos"]
-        )
+        aba_visao, aba_financeiro, aba_cobranca, aba_estoque, aba_pedidos = st.tabs(["Visao Geral", "Financeiro", "Cobrar Clientes", "Estoque", "Todos os Pedidos"])
 
-        if True:
-
-            # ── ABA 1: VISÃO GERAL ──
-            with aba_visao:
-                if df.empty:
-                    st.info("Nenhum pedido registrado ainda.")
-                else:
-                    MESES_PT = {
-                        1:"Janeiro",2:"Fevereiro",3:"Março",4:"Abril",
-                        5:"Maio",6:"Junho",7:"Julho",8:"Agosto",
-                        9:"Setembro",10:"Outubro",11:"Novembro",12:"Dezembro",
-                    }
-
-                    # Parseia data_venda (formato "DD/MM/YYYY HH:MM" ou vazio)
-                    df_v = df.copy()
-                    df_v["_dt"] = pd.to_datetime(
-                        df_v["data_venda"], format="%d/%m/%Y %H:%M", errors="coerce"
+        # ── ABA 1: VISÃO GERAL ──
+        with aba_visao:
+            if df.empty:
+                st.info("Nenhum pedido registrado ainda.")
+            else:
+                col_tp, col_tc = st.columns(2)
+                with col_tp:
+                    st.subheader("Top Produtos")
+                    top_prod = (
+                        df.groupby("produto_nome", as_index=False)["quantidade"]
+                        .sum().sort_values("quantidade", ascending=False).head(5)
                     )
-                    df_v["_periodo"] = df_v["_dt"].dt.to_period("M")
-
-                    periodos_validos = (
-                        df_v["_periodo"].dropna().unique()
+                    top_prod.columns = ["Produto", "Qtd Vendida"]
+                    st.dataframe(top_prod, use_container_width=True, hide_index=True)
+                with col_tc:
+                    st.subheader("Top Clientes")
+                    top_cli = (
+                        df.groupby("cliente_nome", as_index=False)["valor_total"]
+                        .sum().sort_values("valor_total", ascending=False).head(5)
                     )
-                    periodos_ord = sorted(periodos_validos, reverse=True)
+                    top_cli["valor_total"] = top_cli["valor_total"].apply(brl)
+                    top_cli.columns = ["Cliente", "Total Gasto"]
+                    st.dataframe(top_cli, use_container_width=True, hide_index=True)
 
-                    def fmt_mes(p):
-                        return f"{MESES_PT[p.month]}/{p.year}"
+        # ── ABA 2: FINANCEIRO ──
+        with aba_financeiro:
+            if df.empty:
+                st.info("Nenhum pedido registrado ainda.")
+            else:
+                df_pago     = df[df["pago"] == 1]
+                df_pendente = df[df["pago"] == 0]
 
-                    opcoes_str  = [fmt_mes(p) for p in periodos_ord]
-                    periodo_hoje = pd.Period(date.today(), freq="M")
-                    idx_default  = (
-                        periodos_ord.index(periodo_hoje)
-                        if periodo_hoje in periodos_ord else 0
-                    )
+                receita     = df_pago["valor_total"].sum()
+                custo_total = (df_pago["custo_unitario"] * df_pago["quantidade"]).sum() if "custo_unitario" in df_pago.columns and not df_pago.empty else 0
+                lucro       = receita - custo_total
+                margem      = (lucro / receita * 100) if receita > 0 else 0
+                a_receber   = df_pendente["valor_total"].sum()
+                lucro_label = "Lucro" if lucro >= 0 else "Prejuizo"
+                cor_lucro   = "#22c55e" if lucro >= 0 else "#ef4444"
 
-                    col_sel, col_esp = st.columns([2, 3])
-                    with col_sel:
-                        mes_escolhido = st.selectbox(
-                            "Período", opcoes_str,
-                            index=idx_default, key="visao_mes_sel"
-                        )
+                cf1, cf2, cf3, cf4 = st.columns(4)
+                cf1.metric("Receita (pago)", brl(receita))
+                cf2.metric("Gastos", brl(custo_total))
+                cf3.metric(lucro_label, brl(abs(lucro)), delta=f"{margem:.1f}% margem", delta_color="normal" if lucro >= 0 else "inverse")
+                cf4.metric("A Receber", brl(a_receber))
 
-                    periodo_sel = periodos_ord[opcoes_str.index(mes_escolhido)]
-                    df_mes      = df_v[df_v["_periodo"] == periodo_sel]
+                st.divider()
 
-                    # ── Métricas do mês ──
-                    df_mes_pago = df_mes[df_mes["pago"] == 1]
-                    rec_mes  = df_mes_pago["valor_total"].sum()
-                    ped_mes  = len(df_mes)
-                    cli_mes  = df_mes["cliente_nome"].nunique()
-                    a_rec_mes = df_mes[df_mes["pago"] == 0]["valor_total"].sum()
+                st.subheader("Resumo Financeiro")
+                barras = [
+                    ("Receita",    receita,     "#22c55e"),
+                    ("Gastos",     custo_total, "#f59e0b"),
+                    (lucro_label,  abs(lucro),  cor_lucro),
+                    ("A Receber",  a_receber,   "#3b82f6"),
+                ]
+                max_val = max(v for _, v, _ in barras) or 1
+                for label, valor, cor in barras:
+                    pct = valor / max_val * 100
+                    st.markdown(f"""
+                    <div style="margin-bottom:14px;">
+                        <div style="display:flex;justify-content:space-between;margin-bottom:5px;">
+                            <span style="font-weight:700;color:#0f172a;font-size:0.95rem;">{label}</span>
+                            <span style="font-weight:800;color:{cor};font-size:0.95rem;">{brl(valor)}</span>
+                        </div>
+                        <div style="background:#e2e8f0;border-radius:8px;height:24px;overflow:hidden;">
+                            <div style="width:{pct:.1f}%;background:{cor};height:100%;border-radius:8px;"></div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-                    cm1, cm2, cm3, cm4 = st.columns(4)
-                    cm1.metric("Receita do mês",   brl(rec_mes))
-                    cm2.metric("A receber",         brl(a_rec_mes))
-                    cm3.metric("Pedidos no mês",    ped_mes)
-                    cm4.metric("Clientes no mês",   cli_mes)
+                st.divider()
 
-                    st.divider()
+                st.subheader("Margem por Produto")
+                custos_db_fin = carregar_custos()
+                for p in PRODUTOS:
+                    if p["id"] not in custos_db_fin:
+                        continue
+                    custo_p  = custos_db_fin[p["id"]]
+                    margem_p = p["preco"] - custo_p
+                    mpct     = (margem_p / p["preco"] * 100) if p["preco"] > 0 else 0
+                    cor_m    = "#22c55e" if margem_p >= 0 else "#ef4444"
+                    pct_bar  = max(0, min(100, mpct))
+                    st.markdown(f"""
+                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 16px;margin-bottom:10px;">
+                        <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+                            <span style="font-weight:700;color:#0f172a;">{p['nome']}</span>
+                            <span style="color:#64748b;font-size:0.88rem;">
+                                Venda <b>{brl(p['preco'])}</b> &nbsp;|&nbsp; Custo <b>{brl(custo_p)}</b> &nbsp;|&nbsp;
+                                <span style="color:{cor_m};font-weight:700;">Margem {brl(margem_p)} ({mpct:.0f}%)</span>
+                            </span>
+                        </div>
+                        <div style="background:#e2e8f0;border-radius:6px;height:8px;overflow:hidden;">
+                            <div style="width:{pct_bar:.1f}%;background:{cor_m};height:100%;border-radius:6px;"></div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-                    if df_mes.empty:
-                        st.info(f"Nenhum pedido registrado em {mes_escolhido}.")
-                    else:
-                        col_tp, col_tc = st.columns(2)
+        # ── ABA 3: COBRANÇAS POR CLIENTE ──
+        with aba_cobranca:
+            df_pagar = df[df["pago"] == 0].copy() if "pago" in df.columns else pd.DataFrame()
 
-                        with col_tp:
-                            st.subheader(f"Top Produtos — {mes_escolhido}")
-                            top_prod = (
-                                df_mes.groupby("produto_nome", as_index=False)
-                                .agg(Qtd=("quantidade", "sum"), Faturamento=("valor_total", "sum"))
-                                .sort_values("Qtd", ascending=False)
-                                .head(5)
-                            )
-                            top_prod["Faturamento"] = top_prod["Faturamento"].apply(brl)
-                            top_prod.rename(columns={"produto_nome": "Produto"}, inplace=True)
-                            st.dataframe(top_prod, use_container_width=True, hide_index=True)
+            if df_pagar.empty:
+                st.success("Nenhum valor pendente. Todos os clientes estao em dia!")
+            else:
+                total_pendente = df_pagar["valor_total"].sum()
+                num_pendente   = df_pagar["cliente_nome"].nunique()
+                cp1, cp2 = st.columns(2)
+                cp1.metric("Total a receber", brl(total_pendente))
+                cp2.metric("Clientes devedores", num_pendente)
+                st.divider()
 
-                        with col_tc:
-                            st.subheader(f"Top Clientes — {mes_escolhido}")
-                            top_cli = (
-                                df_mes.groupby("cliente_nome", as_index=False)
-                                .agg(Total=("valor_total", "sum"), Pedidos=("id", "count"))
-                                .sort_values("Total", ascending=False)
-                                .head(5)
-                            )
-                            top_cli["Total"] = top_cli["Total"].apply(brl)
-                            top_cli.rename(columns={"cliente_nome": "Cliente"}, inplace=True)
-                            st.dataframe(top_cli, use_container_width=True, hide_index=True)
+                clientes_pendentes = sorted(df_pagar["cliente_nome"].unique().tolist())
 
-            # ── ABA 2: FINANCEIRO ──
-            with aba_financeiro:
-                if df.empty:
-                    st.info("Nenhum pedido registrado ainda.")
-                else:
-                    df_pago   = df[df["pago"] == 1]
-                    df_pendente = df[df["pago"] == 0]
+                for cliente in clientes_pendentes:
+                    pedidos_cli = df_pagar[df_pagar["cliente_nome"] == cliente]
+                    total_cli   = pedidos_cli["valor_total"].sum()
 
-                    receita       = df_pago["valor_total"].sum()
-                    custo_total   = (df_pago["custo_unitario"] * df_pago["quantidade"]).sum() if "custo_unitario" in df_pago.columns and not df_pago.empty else 0
-                    lucro         = receita - custo_total
-                    margem        = (lucro / receita * 100) if receita > 0 else 0
-                    a_receber     = df_pendente["valor_total"].sum()
-                    lucro_label   = "Lucro" if lucro >= 0 else "Prejuizo"
-                    cor_lucro     = "#22c55e" if lucro >= 0 else "#ef4444"
+                    itens_html = ""
+                    for _, row in pedidos_cli.iterrows():
+                        data_p = str(row["data_venda"])[:16] if "data_venda" in row and row["data_venda"] else "—"
+                        itens_html += f"""
+                        <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f1f5f9;">
+                            <span style="color:#374151;">{row['produto_nome']} <b>x{int(row['quantidade'])}</b></span>
+                            <span style="color:#6b7280;font-size:0.82rem;">{data_p}</span>
+                            <span style="font-weight:700;color:#0f172a;">{brl(row['valor_total'])}</span>
+                        </div>"""
 
-                    # ── Cards de métricas ──
-                    cor_lucro_bg  = "#f0fdf4" if lucro >= 0 else "#fef2f2"
-                    cor_lucro_brd = "#86efac" if lucro >= 0 else "#fca5a5"
-                    cor_lucro_txt = "#15803d" if lucro >= 0 else "#dc2626"
-                    cor_lucro_lbl = "#166534" if lucro >= 0 else "#991b1b"
-                    st.markdown(
-                        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">'
-                        f'<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:12px 14px;">'
-                        f'<div style="font-size:0.68rem;color:#166534;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">Receita (pago)</div>'
-                        f'<div style="font-size:1.3rem;font-weight:800;color:#15803d;">{brl(receita)}</div></div>'
-                        f'<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:12px 14px;">'
-                        f'<div style="font-size:0.68rem;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">Gastos</div>'
-                        f'<div style="font-size:1.3rem;font-weight:800;color:#d97706;">{brl(custo_total)}</div></div>'
-                        f'<div style="background:{cor_lucro_bg};border:1px solid {cor_lucro_brd};border-radius:10px;padding:12px 14px;">'
-                        f'<div style="font-size:0.68rem;color:{cor_lucro_lbl};font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">{lucro_label} · {margem:.1f}%</div>'
-                        f'<div style="font-size:1.3rem;font-weight:800;color:{cor_lucro_txt};">{brl(abs(lucro))}</div></div>'
-                        f'<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 14px;">'
-                        f'<div style="font-size:0.68rem;color:#1e40af;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;">A Receber</div>'
-                        f'<div style="font-size:1.3rem;font-weight:800;color:#1d4ed8;">{brl(a_receber)}</div></div>'
-                        '</div>',
-                        unsafe_allow_html=True
-                    )
-
-                    st.divider()
-
-                    # ── Gráfico visual de barras ──
-                    st.subheader("Resumo Financeiro")
-                    barras = [
-                        ("Receita",    receita,     "#22c55e"),
-                        ("Gastos",     custo_total, "#f59e0b"),
-                        (lucro_label,  abs(lucro),  cor_lucro),
-                        ("A Receber",  a_receber,   "#3b82f6"),
-                    ]
-                    max_val = max(v for _, v, _ in barras) or 1
-                    for label, valor, cor in barras:
-                        pct = valor / max_val * 100
+                    col_cli, col_btn_pago = st.columns([4, 1])
+                    with col_cli:
                         st.markdown(f"""
-                        <div style="margin-bottom:14px;">
-                            <div style="display:flex;justify-content:space-between;margin-bottom:5px;">
-                                <span style="font-weight:700;color:#0f172a;font-size:0.95rem;">{label}</span>
-                                <span style="font-weight:800;color:{cor};font-size:0.95rem;">{brl(valor)}</span>
+                        <div style="background:white;border:1px solid #e2e8f0;border-left:5px solid #f59e0b;
+                        border-radius:12px;padding:16px 18px;margin-bottom:8px;">
+                            <div style="font-weight:800;font-size:1rem;color:#0f172a;margin-bottom:8px;">
+                                {cliente}
                             </div>
-                            <div style="background:#e2e8f0;border-radius:8px;height:24px;overflow:hidden;">
-                                <div style="width:{pct:.1f}%;background:{cor};height:100%;border-radius:8px;"></div>
+                            {itens_html}
+                            <div style="font-weight:800;font-size:1.1rem;color:#d97706;margin-top:10px;">
+                                Total a receber: {brl(total_cli)}
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
-
-                    st.divider()
-
-                    # ── Margem por produto ──
-                    st.subheader("Margem por Produto")
-                    custos_db_fin = carregar_custos()
-                    for p in PRODUTOS:
-                        if p["id"] not in custos_db_fin:
-                            continue
-                        custo_p   = custos_db_fin[p["id"]]
-                        margem_p  = p["preco"] - custo_p
-                        mpct      = (margem_p / p["preco"] * 100) if p["preco"] > 0 else 0
-                        cor_m     = "#22c55e" if margem_p >= 0 else "#ef4444"
-                        pct_bar   = max(0, min(100, mpct))
-                        st.markdown(f"""
-                        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 16px;margin-bottom:10px;">
-                            <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-                                <span style="font-weight:700;color:#0f172a;">{p['nome']}</span>
-                                <span style="color:#64748b;font-size:0.88rem;">
-                                    Venda <b>{brl(p['preco'])}</b> &nbsp;|&nbsp; Custo <b>{brl(custo_p)}</b> &nbsp;|&nbsp;
-                                    <span style="color:{cor_m};font-weight:700;">Margem {brl(margem_p)} ({mpct:.0f}%)</span>
-                                </span>
-                            </div>
-                            <div style="background:#e2e8f0;border-radius:6px;height:8px;overflow:hidden;">
-                                <div style="width:{pct_bar:.1f}%;background:{cor_m};height:100%;border-radius:6px;"></div>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-
-            # ── ABA 3: COBRANÇAS POR CLIENTE ──
-            with aba_cobranca:
-                df_pagar = df[df["pago"] == 0].copy() if "pago" in df.columns else pd.DataFrame()
-
-                if df_pagar.empty:
-                    st.success("Nenhum valor pendente. Todos os clientes estao em dia!")
-                else:
-                    total_pendente = df_pagar["valor_total"].sum()
-                    num_pendente   = df_pagar["cliente_nome"].nunique()
-                    cp1, cp2 = st.columns(2)
-                    cp1.metric("Total a receber", brl(total_pendente))
-                    cp2.metric("Clientes devedores", num_pendente)
-                    st.divider()
-
-                    clientes_pendentes = sorted(df_pagar["cliente_nome"].unique().tolist())
-
-                    for cliente in clientes_pendentes:
-                        pedidos_cli = df_pagar[df_pagar["cliente_nome"] == cliente]
-                        total_cli   = pedidos_cli["valor_total"].sum()
-
-                        # Lista de itens com data
-                        itens_html = ""
-                        for _, row in pedidos_cli.iterrows():
-                            data_p = str(row["data_venda"])[:16] if "data_venda" in row and row["data_venda"] else "—"
-                            itens_html += f"""
-                            <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f1f5f9;">
-                                <span style="color:#374151;">{row['produto_nome']} <b>x{int(row['quantidade'])}</b></span>
-                                <span style="color:#6b7280;font-size:0.82rem;">{data_p}</span>
-                                <span style="font-weight:700;color:#0f172a;">{brl(row['valor_total'])}</span>
-                            </div>"""
-
-                        col_cli, col_btn_pago = st.columns([4, 1])
-                        with col_cli:
-                            st.markdown(f"""
-                            <div style="background:white;border:1px solid #e2e8f0;border-left:5px solid #f59e0b;
-                            border-radius:12px;padding:16px 18px;margin-bottom:8px;">
-                                <div style="font-weight:800;font-size:1rem;color:#0f172a;margin-bottom:8px;">
-                                    {cliente}
-                                </div>
-                                {itens_html}
-                                <div style="font-weight:800;font-size:1.1rem;color:#d97706;margin-top:10px;">
-                                    Total a receber: {brl(total_cli)}
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        with col_btn_pago:
-                            st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
-                            if st.button("Marcar pago", key=f"pago_{cliente}", use_container_width=True, type="primary"):
-                                marcar_pago_cliente(cliente)
-                                st.success(f"{cliente} marcado como pago!")
-                                st.rerun()
-
-            # ── ABA 3: ESTOQUE ──
-            with aba_estoque:
-                st.subheader("Controle de Estoque")
-                estoque_db = carregar_estoque()
-                custos_db = carregar_custos()
-                produtos_com_estoque = [p for p in PRODUTOS if p["id"] in estoque_db]
-
-                st.caption("Qtd = unidades em estoque | Custo = valor pago por unidade na ultima compra")
-                col_h1, col_h2, col_h3, col_h4 = st.columns([2.5, 1.2, 1.2, 1.5])
-                col_h1.markdown("**Produto**")
-                col_h2.markdown("**Qtd**")
-                col_h3.markdown("**Custo (R$)**")
-
-                for p in produtos_com_estoque:
-                    qtd_atual = estoque_db.get(p["id"], 0)
-                    custo_atual = custos_db.get(p["id"], 0.0)
-                    if qtd_atual == 0:
-                        cor, label = "#fee2e2", "Esgotado"
-                    elif qtd_atual <= 3:
-                        cor, label = "#fff7ed", f"{qtd_atual} un."
-                    else:
-                        cor, label = "#f0fdf4", f"{qtd_atual} un."
-
-                    col_nome, col_qtd, col_custo, col_btn = st.columns([2.5, 1.2, 1.2, 1.5])
-                    with col_nome:
-                        st.markdown(f"""
-                        <div style="background:{cor};border-radius:10px;padding:10px 14px;margin-bottom:4px;">
-                            <div style="font-weight:700;color:#0f172a;">{p['nome']}</div>
-                            <div style="font-size:0.82rem;color:#64748b;">Estoque: <b>{label}</b> | Custo: <b>{brl(custo_atual)}</b></div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    with col_qtd:
-                        nova_qtd = st.number_input("Qtd", min_value=0, step=1, value=qtd_atual, key=f"est_{p['id']}", label_visibility="collapsed")
-                    with col_custo:
-                        novo_custo = st.number_input("Custo", min_value=0.0, step=0.01, value=float(custo_atual), key=f"custo_{p['id']}", label_visibility="collapsed", format="%.2f")
-                    with col_btn:
-                        st.markdown("<div style='margin-top:4px;'></div>", unsafe_allow_html=True)
-                        if st.button("Atualizar", key=f"upd_est_{p['id']}", use_container_width=True):
-                            definir_estoque(p["id"], int(nova_qtd))
-                            definir_custo(p["id"], float(novo_custo))
-                            st.success(f"{p['nome']} atualizado!")
+                    with col_btn_pago:
+                        st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
+                        if st.button("Marcar pago", key=f"pago_{cliente}", use_container_width=True, type="primary"):
+                            marcar_pago_cliente(cliente)
+                            st.success(f"{cliente} marcado como pago!")
                             st.rerun()
 
-                st.info("Cappuccino em Po nao tem controle de estoque (vendido por dose).")
+        # ── ABA 4: ESTOQUE ──
+        with aba_estoque:
+            st.subheader("Controle de Estoque")
+            estoque_db = carregar_estoque()
+            custos_db  = carregar_custos()
+            produtos_com_estoque = [p for p in PRODUTOS if p["id"] in estoque_db]
 
-            # ── ABA 5: PREÇOS ──
-            with aba_precos:
-                st.subheader("Editar Preços de Venda")
-                st.caption("Altere o preço de cada produto. O novo valor é refletido imediatamente nos cards.")
-                precos_atuais = carregar_precos()
+            st.caption("Qtd = unidades em estoque | Custo = valor pago por unidade na ultima compra")
+            col_h1, col_h2, col_h3, col_h4 = st.columns([2.5, 1.2, 1.2, 1.5])
+            col_h1.markdown("**Produto**")
+            col_h2.markdown("**Qtd**")
+            col_h3.markdown("**Custo (R$)**")
 
-                col_ph1, col_ph2, col_ph3 = st.columns([2.5, 1.5, 1.5])
-                col_ph1.markdown("**Produto**")
-                col_ph2.markdown("**Preço atual (R$)**")
-
-                for p in _PRODUTOS_BASE:
-                    preco_atual = precos_atuais.get(p["id"], p["preco"])
-                    col_pn, col_pv, col_pb = st.columns([2.5, 1.5, 1.5])
-                    with col_pn:
-                        st.markdown(
-                            f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;'
-                            f'padding:10px 14px;margin-bottom:4px;">'
-                            f'<div style="font-weight:700;color:#0f172a;">{p["nome"]}</div>'
-                            f'<div style="font-size:0.8rem;color:#64748b;">Preço base: R$ {p["preco"]:.2f}</div>'
-                            f'</div>',
-                            unsafe_allow_html=True
-                        )
-                    with col_pv:
-                        novo_preco = st.number_input(
-                            "Preço", min_value=0.01, step=0.50,
-                            value=float(preco_atual),
-                            key=f"preco_{p['id']}",
-                            label_visibility="collapsed",
-                            format="%.2f"
-                        )
-                    with col_pb:
-                        st.markdown("<div style='margin-top:4px;'></div>", unsafe_allow_html=True)
-                        if st.button("Salvar", key=f"upd_preco_{p['id']}", use_container_width=True, type="primary"):
-                            definir_preco(p["id"], novo_preco)
-                            st.success(f"{p['nome']}: preço atualizado para R$ {novo_preco:.2f}")
-                            st.rerun()
-
-            # ── ABA: LANÇAR VENDA ──
-            with aba_lancar:
-                st.subheader("Lançar Venda Manual")
-                st.caption("Registre uma venda feita fora do site. Ela afeta estoque, financeiro, cobrança e histórico.")
-
-                precos_lancar = carregar_precos()
-                custos_lancar = carregar_custos()
-
-                opcoes_produto = [p["nome"] for p in PRODUTOS] + ["Produto personalizado"]
-
-                cliente_manual = st.text_input("Nome do cliente *", key="manual_cliente",
-                                               placeholder="Ex: João Silva")
-                produto_sel = st.selectbox("Produto *", opcoes_produto, key="manual_produto")
-
-                if produto_sel == "Produto personalizado":
-                    produto_nome_manual = st.text_input("Nome do produto *", key="manual_produto_nome",
-                                                         placeholder="Ex: Água mineral")
-                    produto_id_manual   = None
-                    preco_sug           = 1.0
-                    custo_sug           = 0.0
+            for p in produtos_com_estoque:
+                qtd_atual   = estoque_db.get(p["id"], 0)
+                custo_atual = custos_db.get(p["id"], 0.0)
+                if qtd_atual == 0:
+                    cor, label = "#fee2e2", "Esgotado"
+                elif qtd_atual <= 3:
+                    cor, label = "#fff7ed", f"{qtd_atual} un."
                 else:
-                    produto_obj         = next((p for p in PRODUTOS if p["nome"] == produto_sel), None)
-                    produto_nome_manual = produto_sel
-                    produto_id_manual   = produto_obj["id"] if produto_obj else None
-                    preco_sug           = float(precos_lancar.get(produto_id_manual, produto_obj["preco"] if produto_obj else 1.0))
-                    custo_sug           = float(custos_lancar.get(produto_id_manual, 0.0))
+                    cor, label = "#f0fdf4", f"{qtd_atual} un."
 
-                col_qtd, col_preco, col_custo = st.columns(3)
+                col_nome, col_qtd, col_custo, col_btn = st.columns([2.5, 1.2, 1.2, 1.5])
+                with col_nome:
+                    st.markdown(f"""
+                    <div style="background:{cor};border-radius:10px;padding:10px 14px;margin-bottom:4px;">
+                        <div style="font-weight:700;color:#0f172a;">{p['nome']}</div>
+                        <div style="font-size:0.82rem;color:#64748b;">Estoque: <b>{label}</b> | Custo: <b>{brl(custo_atual)}</b></div>
+                    </div>
+                    """, unsafe_allow_html=True)
                 with col_qtd:
-                    qtd_manual = st.number_input("Quantidade *", min_value=1, step=1, value=1, key="manual_qtd")
-                with col_preco:
-                    _k = produto_sel.replace(" ", "_")
-                    preco_manual = st.number_input("Preço (R$) *", min_value=0.01, step=0.50,
-                                                    value=preco_sug, key=f"manual_preco_{_k}", format="%.2f")
+                    nova_qtd = st.number_input("Qtd", min_value=0, step=1, value=qtd_atual, key=f"est_{p['id']}", label_visibility="collapsed")
                 with col_custo:
-                    custo_manual = st.number_input("Custo (R$)", min_value=0.0, step=0.50,
-                                                    value=custo_sug, key=f"manual_custo_{_k}", format="%.2f")
-
-                col_status, col_data = st.columns(2)
-                with col_status:
-                    status_manual = st.radio("Pagamento *", ["Pago", "Pendente"],
-                                             horizontal=True, key="manual_status")
-                with col_data:
-                    data_manual = st.date_input("Data da venda *", value=date.today(),
-                                                 format="DD/MM/YYYY", key="manual_data")
-
-                obs_manual = st.text_area("Observação (opcional)",
-                                          placeholder="Ex: Venda feita pessoalmente no trabalho",
-                                          key="manual_obs", height=70)
-
-                # Preview
-                total_prev  = int(qtd_manual) * float(preco_manual)
-                custo_prev  = int(qtd_manual) * float(custo_manual)
-                lucro_prev  = total_prev - custo_prev
-                cor_lucro_p = "#22c55e" if lucro_prev >= 0 else "#ef4444"
-                cor_status  = "#22c55e" if status_manual == "Pago" else "#f59e0b"
-                st.markdown(
-                    '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin:10px 0;">'
-                    '<div style="font-weight:700;color:#0f172a;margin-bottom:10px;">Resumo da venda</div>'
-                    '<div style="display:flex;gap:24px;flex-wrap:wrap;">'
-                    f'<div><div style="color:#64748b;font-size:0.78rem;">Total</div><b style="color:#0f172a;">{brl(total_prev)}</b></div>'
-                    f'<div><div style="color:#64748b;font-size:0.78rem;">Custo total</div><b style="color:#f59e0b;">{brl(custo_prev)}</b></div>'
-                    f'<div><div style="color:#64748b;font-size:0.78rem;">Lucro estimado</div><b style="color:{cor_lucro_p};">{brl(lucro_prev)}</b></div>'
-                    f'<div><div style="color:#64748b;font-size:0.78rem;">Status</div><b style="color:{cor_status};">{status_manual}</b></div>'
-                    '</div></div>',
-                    unsafe_allow_html=True
-                )
-
-                if st.button("Registrar venda", type="primary", use_container_width=True, key="btn_lancar_venda"):
-                    erros_lancar = []
-                    nome_cli = cliente_manual.strip()
-                    if len(nome_cli) < 2:
-                        erros_lancar.append("Nome do cliente deve ter pelo menos 2 caracteres.")
-                    if produto_sel == "Produto personalizado" and not produto_nome_manual.strip():
-                        erros_lancar.append("Informe o nome do produto personalizado.")
-                    if erros_lancar:
-                        for e in erros_lancar:
-                            st.error(e)
-                    else:
-                        data_str  = data_manual.strftime("%d/%m/%Y %H:%M")
-                        pago_int  = 1 if status_manual == "Pago" else 0
-                        salvar_venda_manual(
-                            cliente_nome    = nome_cli,
-                            produto_nome    = produto_nome_manual.strip(),
-                            produto_id      = produto_id_manual,
-                            quantidade      = int(qtd_manual),
-                            valor_unitario  = float(preco_manual),
-                            custo_unitario  = float(custo_manual),
-                            pago            = pago_int,
-                            data_venda      = data_str,
-                            observacao      = obs_manual.strip(),
-                        )
-                        st.success(
-                            f"Venda registrada: {produto_nome_manual} x{qtd_manual} "
-                            f"para {nome_cli} — {brl(total_prev)} ({status_manual})"
-                        )
+                    novo_custo = st.number_input("Custo", min_value=0.0, step=0.01, value=float(custo_atual), key=f"custo_{p['id']}", label_visibility="collapsed", format="%.2f")
+                with col_btn:
+                    st.markdown("<div style='margin-top:4px;'></div>", unsafe_allow_html=True)
+                    if st.button("Atualizar", key=f"upd_est_{p['id']}", use_container_width=True):
+                        definir_estoque(p["id"], int(nova_qtd))
+                        definir_custo(p["id"], float(novo_custo))
+                        st.success(f"{p['nome']} atualizado!")
                         st.rerun()
 
-            with aba_pedidos:
-                if df.empty:
-                    st.info("Nenhum pedido registrado ainda.")
-                else:
-                    col_ped, col_limpar = st.columns([4, 1])
-                    with col_ped:
-                        st.subheader("Todos os Pedidos")
-                    with col_limpar:
-                        if st.button("Limpar tudo", use_container_width=True):
-                            limpar_pedidos()
-                            st.success("Todos os pedidos removidos.")
-                            st.rerun()
+            st.info("Cappuccino em Po nao tem controle de estoque (vendido por dose).")
 
-                for _, row in df.iterrows():
-                    pago_col   = int(row["pago"]) if "pago" in row else 1
-                    status_cor = "#22c55e" if pago_col else "#f59e0b"
-                    status_txt = "Pago" if pago_col else "Pendente"
-                    data_txt   = str(row["data_venda"])[:16] if "data_venda" in row and row["data_venda"] else "—"
-                    origem_val = str(row.get("origem", "site") or "site")
-                    origem_badge = (
-                        '<span style="background:#fef3c7;color:#92400e;font-size:0.68rem;'
-                        'font-weight:700;padding:2px 7px;border-radius:20px;margin-left:4px;">manual</span>'
-                        if origem_val == "manual" else ""
-                    )
-                    col_info, col_acoes = st.columns([3, 1])
-                    with col_info:
-                        st.markdown(
-                            f'<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;'
-                            f'padding:10px 14px;margin-bottom:2px;">'
-                            f'<div style="font-weight:700;color:#0f172a;font-size:0.88rem;">'
-                            f'{row["cliente_nome"]}{origem_badge}</div>'
-                            f'<div style="color:#475569;font-size:0.8rem;margin:2px 0;">'
-                            f'{row["produto_nome"]} · {int(row["quantidade"])}x · {brl(row["valor_unitario"])}</div>'
-                            f'<div style="display:flex;gap:10px;align-items:center;margin-top:4px;flex-wrap:wrap;">'
-                            f'<span style="font-size:0.75rem;color:#64748b;">{data_txt}</span>'
-                            f'<span style="font-size:0.75rem;font-weight:700;color:{status_cor};">{status_txt}</span>'
-                            f'<span style="font-size:0.95rem;font-weight:800;color:#0f172a;">{brl(float(row["valor_total"]))}</span>'
-                            f'</div></div>',
-                            unsafe_allow_html=True
-                        )
-                    with col_acoes:
-                        novo_total = st.number_input(
-                            "Valor", min_value=0.0, step=0.01,
-                            value=float(row["valor_total"]),
-                            key=f"edit_val_{row['id']}",
-                            label_visibility="collapsed", format="%.2f"
-                        )
-                        if novo_total != float(row["valor_total"]):
-                            if st.button("Salvar", key=f"save_{row['id']}", type="primary", use_container_width=True):
-                                editar_venda(int(row["id"]), novo_total)
-                                st.rerun()
-                        else:
-                            st.markdown(f'<div style="color:{status_cor};font-weight:700;font-size:0.78rem;text-align:center;padding:4px 0;">{status_txt}</div>', unsafe_allow_html=True)
-                        if st.button("Excluir", key=f"del_{row['id']}", use_container_width=True):
-                            deletar_pedido(int(row["id"]))
-                            st.rerun()
+        # ── ABA 5: TODOS OS PEDIDOS ──
+        with aba_pedidos:
+            if df.empty:
+                st.info("Nenhum pedido registrado ainda.")
+            else:
+                col_ped, col_limpar = st.columns([4, 1])
+                with col_ped:
+                    st.subheader("Todos os Pedidos")
+                with col_limpar:
+                    if st.button("Limpar tudo", use_container_width=True):
+                        limpar_pedidos()
+                        st.success("Todos os pedidos removidos.")
+                        st.rerun()
+
+            for _, row in df.iterrows():
+                pago_col   = int(row["pago"]) if "pago" in row else 1
+                status_cor = "#22c55e" if pago_col else "#f59e0b"
+                status_txt = "Pago" if pago_col else "Pendente"
+                data_txt   = str(row["data_venda"])[:16] if "data_venda" in row and row["data_venda"] else "—"
+                col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1.6, 2, 0.6, 1.0, 1.4, 1.1, 0.9, 0.9])
+                col1.write(row["cliente_nome"])
+                col2.write(row["produto_nome"])
+                col3.write(int(row["quantidade"]))
+                col4.write(brl(row["valor_unitario"]))
+                col5.caption(data_txt)
+                novo_total = col6.number_input(
+                    "Valor", min_value=0.0, step=0.01,
+                    value=float(row["valor_total"]),
+                    key=f"edit_val_{row['id']}",
+                    label_visibility="collapsed", format="%.2f"
+                )
+                if novo_total != float(row["valor_total"]):
+                    if col7.button("Salvar", key=f"save_{row['id']}", type="primary"):
+                        editar_venda(int(row["id"]), novo_total)
+                        st.rerun()
+                else:
+                    col7.markdown(f'<span style="color:{status_cor};font-weight:700;">{status_txt}</span>', unsafe_allow_html=True)
+                if col8.button("Excluir", key=f"del_{row['id']}"):
+                    deletar_pedido(int(row["id"]))
+                    st.rerun()
