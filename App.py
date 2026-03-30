@@ -124,10 +124,17 @@ PRODUTOS = [
 # =========================
 @st.cache_resource
 def get_db():
+    from urllib.parse import urlparse, unquote
     url = st.secrets["DATABASE_URL"]
-    if "sslmode" not in url:
-        url += "?sslmode=require"
-    return psycopg2.connect(url)
+    parsed = urlparse(url)
+    return psycopg2.connect(
+        host=parsed.hostname,
+        port=parsed.port or 5432,
+        dbname=parsed.path.lstrip("/"),
+        user=parsed.username,
+        password=unquote(parsed.password),
+        sslmode="require"
+    )
 
 def get_conn():
     conn = get_db()
