@@ -1,5 +1,5 @@
 import os
-import psycopg2
+from supabase import create_client
 from urllib.parse import quote
 import base64
 import io
@@ -120,103 +120,37 @@ PRODUTOS = [
 
 
 # =========================
-# BANCO DE DADOS (Supabase / PostgreSQL)
+# BANCO DE DADOS (Supabase)
 # =========================
 @st.cache_resource
-def get_db():
-    from urllib.parse import urlparse, unquote
-    url = st.secrets["DATABASE_URL"]
-    parsed = urlparse(url)
-    return psycopg2.connect(
-        host=parsed.hostname,
-        port=parsed.port or 5432,
-        dbname=parsed.path.lstrip("/"),
-        user=parsed.username,
-        password=unquote(parsed.password),
-        sslmode="require"
-    )
+def get_sb():
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
-def get_conn():
-    conn = get_db()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1")
-    except Exception:
-        get_db.clear()
-        conn = get_db()
-    return conn
+sb = get_sb()
 
 def init_db():
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS pedidos (
-            id               SERIAL PRIMARY KEY,
-            cliente_nome     TEXT NOT NULL,
-            produto_nome     TEXT NOT NULL,
-            quantidade       INTEGER NOT NULL,
-            valor_unitario   REAL NOT NULL,
-            valor_total      REAL NOT NULL,
-            forma_pagamento  TEXT NOT NULL DEFAULT 'agora',
-            pago             INTEGER NOT NULL DEFAULT 1,
-            custo_unitario   REAL NOT NULL DEFAULT 0,
-            data_venda       TEXT DEFAULT ''
-        )
-        """)
-        for col, default in [
-            ("forma_pagamento", "'agora'"),
-            ("pago",            "1"),
-            ("custo_unitario",  "0"),
-            ("data_venda",      "''"),
-        ]:
-            cur.execute(
-                f"ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS {col} TEXT DEFAULT {default}"
-            )
-
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS custos (
-            produto_id   INTEGER PRIMARY KEY,
-            produto_nome TEXT NOT NULL,
-            custo        REAL NOT NULL DEFAULT 0
-        )
-        """)
-        cur.execute("SELECT COUNT(*) FROM custos")
-        if cur.fetchone()[0] == 0:
-            cur.executemany(
-                "INSERT INTO custos (produto_id, produto_nome, custo) VALUES (%s, %s, %s)",
-                [
-                    (1, "Cappuccino 260 ml", 7.30),
-                    (2, "Barra de Proteína",  5.14),
-                    (4, "Iogurte Proteico",   6.00),
-                ],
-            )
-
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS estoque (
-            produto_id   INTEGER PRIMARY KEY,
-            produto_nome TEXT NOT NULL,
-            quantidade   INTEGER NOT NULL DEFAULT 0
-        )
-        """)
-        cur.execute("SELECT COUNT(*) FROM estoque")
-        if cur.fetchone()[0] == 0:
-            cur.executemany(
-                "INSERT INTO estoque (produto_id, produto_nome, quantidade) VALUES (%s, %s, %s)",
-                [
-                    (1, "Cappuccino 260 ml", 11),
-                    (2, "Barra de Proteína",  19),
-                    (4, "Iogurte Proteico",    3),
-                ],
-            )
-    conn.commit()
+    if not sb.table("custos").select("produto_id").execute().data:
+        sb.table("custos").insert([
+            {"produto_id": 1, "produto_nome": "Cappuccino 260 ml", "custo": 7.30},
+            {"produto_id": 2, "produto_nome": "Barra de Proteína",  "custo": 5.14},
+            {"produto_id": 4, "produto_nome": "Iogurte Proteico",   "custo": 6.00},
+        ]).execute()
+    if not sb.table("estoque").select("produto_id").execute().data:
+        sb.table("estoque").insert([
+            {"produto_id": 1, "produto_nome": "Cappuccino 260 ml", "quantidade": 11},
+            {"produto_id": 2, "produto_nome": "Barra de Proteína",  "quantidade": 19},
+            {"produto_id": 4, "produto_nome": "Iogurte Proteico",   "quantidade": 3},
+        ]).execute()
 
 init_db()
 
 import pandas as pd
 
 def carregar_vendas():
-    conn = get_conn()
-    df = pd.read_sql_query("SELECT * FROM pedidos ORDER BY id DESC", conn)
+    data = sb.table("pedidos").select("*").order("id", desc=True).execute().data
+    cols = ["id","cliente_nome","produto_nome","quantidade","valor_unitario",
+            "valor_total","forma_pagamento","pago","custo_unitario","data_venda"]
+    df = pd.DataFrame(data) if data else pd.DataFrame(columns=cols)
     if not df.empty:
         df["pago"]           = pd.to_numeric(df["pago"],           errors="coerce").fillna(1).astype(int)
         df["quantidade"]     = pd.to_numeric(df["quantidade"],     errors="coerce").fillna(0).astype(int)
@@ -226,70 +160,38 @@ def carregar_vendas():
     return df
 
 def deletar_pedido(pedido_id):
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute("DELETE FROM pedidos WHERE id = %s", (pedido_id,))
-    conn.commit()
+    sb.table("pedidos").delete().eq("id", pedido_id).execute()
 
 def limpar_pedidos():
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute("DELETE FROM pedidos")
-    conn.commit()
+    sb.table("pedidos").delete().neq("id", 0).execute()
 
 def marcar_pago(pedido_id):
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute("UPDATE pedidos SET pago = 1 WHERE id = %s", (int(pedido_id),))
-    conn.commit()
+    sb.table("pedidos").update({"pago": 1}).eq("id", int(pedido_id)).execute()
 
 def marcar_pago_cliente(cliente_nome):
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE pedidos SET pago = 1 WHERE cliente_nome = %s AND CAST(pago AS INTEGER) = 0",
-            (cliente_nome,),
-        )
-    conn.commit()
+    sb.table("pedidos").update({"pago": 1}).eq("cliente_nome", cliente_nome).eq("pago", 0).execute()
 
 def carregar_custos():
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute("SELECT produto_id, custo FROM custos")
-        return {row[0]: row[1] for row in cur.fetchall()}
+    data = sb.table("custos").select("produto_id,custo").execute().data
+    return {row["produto_id"]: row["custo"] for row in data}
 
 def definir_custo(produto_id, custo):
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute("UPDATE custos SET custo = %s WHERE produto_id = %s", (custo, produto_id))
-    conn.commit()
+    sb.table("custos").update({"custo": custo}).eq("produto_id", produto_id).execute()
 
 def editar_venda(pedido_id, novo_valor_total):
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute("UPDATE pedidos SET valor_total = %s WHERE id = %s", (novo_valor_total, pedido_id))
-    conn.commit()
+    sb.table("pedidos").update({"valor_total": novo_valor_total}).eq("id", int(pedido_id)).execute()
 
 def carregar_estoque():
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute("SELECT produto_id, quantidade FROM estoque")
-        return {row[0]: row[1] for row in cur.fetchall()}
+    data = sb.table("estoque").select("produto_id,quantidade").execute().data
+    return {row["produto_id"]: row["quantidade"] for row in data}
 
 def atualizar_estoque(produto_id, delta):
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE estoque SET quantidade = GREATEST(0, quantidade + %s) WHERE produto_id = %s",
-            (delta, produto_id),
-        )
-    conn.commit()
+    atual = sb.table("estoque").select("quantidade").eq("produto_id", produto_id).execute().data
+    if atual:
+        sb.table("estoque").update({"quantidade": max(0, atual[0]["quantidade"] + delta)}).eq("produto_id", produto_id).execute()
 
 def definir_estoque(produto_id, quantidade):
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute("UPDATE estoque SET quantidade = %s WHERE produto_id = %s", (quantidade, produto_id))
-    conn.commit()
+    sb.table("estoque").update({"quantidade": quantidade}).eq("produto_id", produto_id).execute()
 
 def salvar_pedido(nome, itens, forma_pagamento):
     from datetime import datetime
@@ -297,24 +199,23 @@ def salvar_pedido(nome, itens, forma_pagamento):
     custos_db  = carregar_custos()
     estoque_db = carregar_estoque()
     data_agora = datetime.now().strftime("%d/%m/%Y %H:%M")
-    conn = get_conn()
-    with conn.cursor() as cur:
-        for item in itens:
-            total      = item["quantidade"] * item["preco"]
-            custo_unit = custos_db.get(item["id"], 0.0)
-            cur.execute("""
-                INSERT INTO pedidos
-                    (cliente_nome, produto_nome, quantidade, valor_unitario, valor_total,
-                     forma_pagamento, pago, custo_unitario, data_venda)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (nome, item["nome"], int(item["quantidade"]), float(item["preco"]),
-                  float(total), forma_pagamento, int(pago), float(custo_unit), data_agora))
-            if item["id"] in estoque_db:
-                cur.execute(
-                    "UPDATE estoque SET quantidade = GREATEST(0, quantidade - %s) WHERE produto_id = %s",
-                    (int(item["quantidade"]), int(item["id"])),
-                )
-    conn.commit()
+    for item in itens:
+        total      = item["quantidade"] * item["preco"]
+        custo_unit = custos_db.get(item["id"], 0.0)
+        sb.table("pedidos").insert({
+            "cliente_nome":    nome,
+            "produto_nome":    item["nome"],
+            "quantidade":      int(item["quantidade"]),
+            "valor_unitario":  float(item["preco"]),
+            "valor_total":     float(total),
+            "forma_pagamento": forma_pagamento,
+            "pago":            int(pago),
+            "custo_unitario":  float(custo_unit),
+            "data_venda":      data_agora,
+        }).execute()
+        if item["id"] in estoque_db:
+            new_qty = max(0, estoque_db[item["id"]] - item["quantidade"])
+            sb.table("estoque").update({"quantidade": new_qty}).eq("produto_id", item["id"]).execute()
 
 def gerar_whatsapp(nome, itens, forma_pagamento="agora"):
     pagamento_txt = "Pagamento na hora" if forma_pagamento == "agora" else "Pagar depois (proximo mes)"
