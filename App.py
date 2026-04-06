@@ -200,17 +200,16 @@ def _init_db():
         ]).execute()
     else:
         sb.table("estoque").upsert({"produto_id": 5, "produto_nome": "Coca Cola", "quantidade": 20}).execute()
-    # Preços
+    # Preços — só insere se a tabela estiver vazia, nunca sobrescreve preços editados
     if not sb.table("precos").select("produto_id").execute().data:
         sb.table("precos").insert([
             {"produto_id": p["id"], "produto_nome": p["nome"], "preco": p["preco"]}
             for p in _PRODUTOS_BASE
         ]).execute()
-    else:
-        for p in _PRODUTOS_BASE:
-            sb.table("precos").upsert({"produto_id": p["id"], "produto_nome": p["nome"], "preco": p["preco"]}).execute()
 
-_init_db()
+if "_db_initialized" not in st.session_state:
+    _init_db()
+    st.session_state["_db_initialized"] = True
 
 import pandas as pd
 
