@@ -180,7 +180,7 @@ def get_sb():
 sb = get_sb()
 
 def _init_db():
-    # Custos
+    # Custos — só insere se a tabela estiver vazia, nunca sobrescreve custos editados
     if not sb.table("custos").select("produto_id").execute().data:
         sb.table("custos").insert([
             {"produto_id": 1, "produto_nome": "Cappuccino 260 ml", "custo": 7.30},
@@ -188,8 +188,6 @@ def _init_db():
             {"produto_id": 4, "produto_nome": "Iogurte Proteico",   "custo": 6.00},
             {"produto_id": 5, "produto_nome": "Coca Cola",           "custo": 4.00},
         ]).execute()
-    else:
-        sb.table("custos").upsert({"produto_id": 5, "produto_nome": "Coca Cola", "custo": 4.00}).execute()
     # Estoque — só insere se a tabela estiver vazia, nunca sobrescreve quantidades editadas
     if not sb.table("estoque").select("produto_id").execute().data:
         sb.table("estoque").insert([
