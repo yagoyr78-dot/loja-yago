@@ -1677,7 +1677,7 @@ elif pagina == "Admin":
 
                     receita       = df_pago["valor_total"].sum()
                     custo_prod    = (df_pago["custo_unitario"] * df_pago["quantidade"]).sum() if "custo_unitario" in df_pago.columns and not df_pago.empty else 0
-                    custo_dono    = df_dono["valor_total"].sum() if not df_dono.empty else 0
+                    custo_dono    = (df_dono["custo_unitario"] * df_dono["quantidade"]).sum() if not df_dono.empty and "custo_unitario" in df_dono.columns else 0
                     custo_total   = custo_prod + custo_dono
                     lucro         = receita - custo_total
                     margem        = (lucro / receita * 100) if receita > 0 else 0
