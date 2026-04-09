@@ -212,7 +212,7 @@ import pandas as pd
 def carregar_vendas():
     data = sb.table("pedidos").select("*").order("id", desc=True).execute().data
     cols = ["id","cliente_nome","produto_nome","quantidade","valor_unitario",
-            "valor_total","forma_pagamento","pago","custo_unitario","data_venda","origem","observacao"]
+            "valor_total","forma_pagamento","pago","custo_unitario","data_venda","origem","observacao","telefone"]
     df = pd.DataFrame(data) if data else pd.DataFrame(columns=cols)
     if not df.empty:
         df["pago"]           = pd.to_numeric(df.get("pago"),           errors="coerce").fillna(1).astype(int)
@@ -291,7 +291,7 @@ def salvar_pedido(nome, itens, forma_pagamento):
 
 def salvar_venda_manual(cliente_nome, produto_nome, produto_id,
                          quantidade, valor_unitario, custo_unitario,
-                         pago, data_venda, observacao):
+                         pago, data_venda, observacao, telefone=""):
     valor_total     = quantidade * valor_unitario
     forma_pagamento = "agora" if pago else "depois"
     estoque_db      = carregar_estoque()
@@ -307,6 +307,7 @@ def salvar_venda_manual(cliente_nome, produto_nome, produto_id,
         "data_venda":      data_venda,
         "origem":          "manual",
         "observacao":      observacao,
+        "telefone":        telefone.strip() if telefone else "",
     }).execute()
     if produto_id is not None and produto_id in estoque_db:
         new_qty = max(0, estoque_db[produto_id] - quantidade)
@@ -346,6 +347,8 @@ if "nome_editando" not in st.session_state:
 
 # Nome do cliente disponível em todo o app (sidebar + Meus Pedidos)
 nome_persistido = st.query_params.get("nome", "").strip()
+# Telefone persistido via URL param ?tel= (usado em Meus Pedidos para vendas manuais)
+tel_persistido  = st.query_params.get("tel", "").strip()
 
 def adicionar(produto, qtd):
     for item in st.session_state.carrinho:
@@ -1308,29 +1311,59 @@ elif pagina == "Meus Pedidos":
 
     st.markdown('<div class="section-title">Meus Pedidos</div>', unsafe_allow_html=True)
 
-    if not nome_persistido:
+    if not nome_persistido and not tel_persistido:
+        # Mostrar formulário de identificação por telefone
         st.markdown("""
         <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:14px;
-        padding:24px;text-align:center;margin-top:16px;">
+        padding:24px;text-align:center;margin-top:16px;margin-bottom:16px;">
             <div style="font-size:2rem;margin-bottom:10px;">👤</div>
             <div style="font-weight:700;font-size:1rem;color:#92400e;margin-bottom:6px;">
                 Identifique-se para ver seus pedidos
             </div>
             <div style="color:#78350f;font-size:0.88rem;">
-                Adicione seu nome no carrinho (coluna à esquerda) para acessar seu histórico de compras.
+                Digite seu número de telefone para acessar seus pedidos.
             </div>
         </div>
         """, unsafe_allow_html=True)
+        col_tel_in, col_tel_btn = st.columns([3, 1])
+        with col_tel_in:
+            tel_input = st.text_input("Número de telefone (apenas números)", key="tel_identificacao",
+                                      placeholder="Ex: 65999990000", label_visibility="collapsed")
+        with col_tel_btn:
+            if st.button("Entrar", type="primary", use_container_width=True, key="btn_identificar_tel"):
+                tel_limpo = "".join(filter(str.isdigit, tel_input))
+                if len(tel_limpo) >= 8:
+                    st.query_params["tel"] = tel_limpo
+                    st.rerun()
+                else:
+                    st.error("Informe um número de telefone válido.")
     else:
         df_todos = carregar_vendas()
 
-        # Filtra apenas pedidos do cliente identificado (comparação case-insensitive)
-        if df_todos.empty:
-            df_cli = pd.DataFrame()
+        # Determina nome para exibição e filtro
+        if nome_persistido:
+            # Pedidos via site (identificado pelo nome)
+            if df_todos.empty:
+                df_cli = pd.DataFrame()
+            else:
+                df_cli = df_todos[
+                    df_todos["cliente_nome"].str.strip().str.lower() == nome_persistido.lower()
+                ].copy()
+            nome_exibicao = nome_persistido
         else:
-            df_cli = df_todos[
-                df_todos["cliente_nome"].str.strip().str.lower() == nome_persistido.lower()
-            ].copy()
+            # Pedidos via telefone (identificado pelo número)
+            tel_limpo = "".join(filter(str.isdigit, tel_persistido))
+            if df_todos.empty or "telefone" not in df_todos.columns:
+                df_cli = pd.DataFrame()
+            else:
+                df_cli = df_todos[
+                    df_todos["telefone"].fillna("").apply(lambda t: "".join(filter(str.isdigit, str(t)))) == tel_limpo
+                ].copy()
+            nome_exibicao = df_cli["cliente_nome"].iloc[0] if not df_cli.empty else tel_persistido
+            # Botão para sair (limpar identificação)
+            if st.button("Sair / Trocar número", key="btn_sair_tel"):
+                del st.query_params["tel"]
+                st.rerun()
 
         if df_cli.empty:
             st.markdown(f"""
@@ -1338,7 +1371,7 @@ elif pagina == "Meus Pedidos":
             padding:24px;text-align:center;margin-top:16px;">
                 <div style="font-size:2rem;margin-bottom:10px;">📦</div>
                 <div style="font-weight:700;font-size:1rem;color:#0369a1;margin-bottom:6px;">
-                    Olá, {nome_persistido}!
+                    Olá, {nome_exibicao}!
                 </div>
                 <div style="color:#0c4a6e;font-size:0.88rem;">
                     Você ainda não tem pedidos registrados.
@@ -1354,7 +1387,7 @@ elif pagina == "Meus Pedidos":
             st.markdown(
                 f'<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;'
                 f'padding:14px 18px;margin-bottom:20px;font-size:0.95rem;color:#0c4a6e;">'
-                f'Olá, <b>{nome_persistido}</b>! Aqui estão todas as suas compras.'
+                f'Olá, <b>{nome_exibicao}</b>! Aqui estão todas as suas compras.'
                 f'</div>',
                 unsafe_allow_html=True
             )
@@ -1857,8 +1890,14 @@ elif pagina == "Admin":
 
                 opcoes_produto = [p["nome"] for p in PRODUTOS] + ["Produto personalizado"]
 
-                cliente_manual = st.text_input("Nome do cliente *", key="manual_cliente",
-                                               placeholder="Ex: João Silva")
+                col_cli_nome, col_cli_tel = st.columns([3, 2])
+                with col_cli_nome:
+                    cliente_manual = st.text_input("Nome do cliente *", key="manual_cliente",
+                                                   placeholder="Ex: João Silva")
+                with col_cli_tel:
+                    telefone_manual = st.text_input("Telefone do cliente", key="manual_telefone",
+                                                    placeholder="Ex: 65999990000",
+                                                    help="Opcional. Permite o cliente ver os pedidos em 'Meus Pedidos' pelo telefone.")
                 produto_sel = st.selectbox("Produto *", opcoes_produto, key="manual_produto")
 
                 if produto_sel == "Produto personalizado":
@@ -1938,6 +1977,7 @@ elif pagina == "Admin":
                             pago            = pago_int,
                             data_venda      = data_str,
                             observacao      = obs_manual.strip(),
+                            telefone        = telefone_manual.strip(),
                         )
                         st.success(
                             f"Venda registrada: {produto_nome_manual} x{qtd_manual} "
