@@ -2005,9 +2005,18 @@ elif pagina == "Admin":
                 if df.empty:
                     st.info("Nenhum pedido registrado ainda.")
                 else:
-                    col_ped, col_limpar = st.columns([4, 1])
+                    col_ped, col_export, col_limpar = st.columns([3, 1, 1])
                     with col_ped:
                         st.subheader("Todos os Pedidos")
+                    with col_export:
+                        csv_backup = df.to_csv(index=False).encode("utf-8")
+                        st.download_button(
+                            label="Exportar CSV",
+                            data=csv_backup,
+                            file_name=f"pedidos_backup_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.csv",
+                            mime="text/csv",
+                            use_container_width=True,
+                        )
                     with col_limpar:
                         if st.button("Limpar tudo", use_container_width=True):
                             limpar_pedidos()
