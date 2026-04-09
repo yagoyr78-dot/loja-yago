@@ -2002,13 +2002,12 @@ elif pagina == "Admin":
                         st.rerun()
 
             with aba_pedidos:
-                if df.empty:
-                    st.info("Nenhum pedido registrado ainda.")
-                else:
-                    col_ped, col_export, col_limpar = st.columns([3, 1, 1])
-                    with col_ped:
-                        st.subheader("Todos os Pedidos")
-                    with col_export:
+                st.subheader("Todos os Pedidos")
+
+                # ── Barra de ações ──
+                col_export, col_import, col_limpar = st.columns(3)
+                with col_export:
+                    if not df.empty:
                         csv_backup = df.to_csv(index=False).encode("utf-8")
                         st.download_button(
                             label="Exportar CSV",
@@ -2017,11 +2016,52 @@ elif pagina == "Admin":
                             mime="text/csv",
                             use_container_width=True,
                         )
-                    with col_limpar:
+                    else:
+                        st.button("Exportar CSV", disabled=True, use_container_width=True)
+
+                with col_import:
+                    csv_file = st.file_uploader("", type=["csv"], key="csv_import", label_visibility="collapsed")
+                    if csv_file is not None:
+                        if st.button("Importar CSV", type="primary", use_container_width=True, key="btn_importar"):
+                            try:
+                                df_imp = pd.read_csv(csv_file)
+                                cols_obrig = {"cliente_nome", "produto_nome", "quantidade", "valor_unitario", "valor_total", "pago"}
+                                if not cols_obrig.issubset(set(df_imp.columns)):
+                                    st.error("CSV inválido — colunas obrigatórias ausentes.")
+                                else:
+                                    registros = []
+                                    for _, r in df_imp.iterrows():
+                                        registros.append({
+                                            "cliente_nome":    str(r.get("cliente_nome", "")),
+                                            "produto_nome":    str(r.get("produto_nome", "")),
+                                            "quantidade":      int(r.get("quantidade", 1)),
+                                            "valor_unitario":  float(r.get("valor_unitario", 0)),
+                                            "valor_total":     float(r.get("valor_total", 0)),
+                                            "forma_pagamento": str(r.get("forma_pagamento", "agora")),
+                                            "pago":            int(r.get("pago", 1)),
+                                            "custo_unitario":  float(r.get("custo_unitario", 0)),
+                                            "data_venda":      str(r.get("data_venda", "")),
+                                            "origem":          str(r.get("origem", "manual")),
+                                            "observacao":      str(r.get("observacao", "") if pd.notna(r.get("observacao")) else ""),
+                                            "telefone":        str(r.get("telefone", "") if pd.notna(r.get("telefone")) else ""),
+                                        })
+                                    sb.table("pedidos").insert(registros).execute()
+                                    st.success(f"{len(registros)} pedidos importados com sucesso!")
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro ao importar: {e}")
+
+                with col_limpar:
+                    if not df.empty:
                         if st.button("Limpar tudo", use_container_width=True):
                             limpar_pedidos()
                             st.success("Todos os pedidos removidos.")
                             st.rerun()
+                    else:
+                        st.button("Limpar tudo", disabled=True, use_container_width=True)
+
+                if df.empty:
+                    st.info("Nenhum pedido registrado ainda.")
 
                 for _, row in df.iterrows():
                     pago_col   = int(row["pago"]) if "pago" in row else 1
