@@ -771,6 +771,10 @@ div[data-testid="stRadio"] > div > label {
     padding: 6px 20px !important;
     font-weight: 600 !important;
     font-size: 0.9rem !important;
+    color: #0f172a !important;
+}
+div[data-testid="stRadio"] > div > label p {
+    color: #0f172a !important;
 }
 
 /* ═══════════════════════════════════
