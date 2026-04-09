@@ -263,12 +263,18 @@ def carregar_precos():
 def definir_preco(produto_id, preco):
     sb.table("precos").update({"preco": float(preco)}).eq("produto_id", int(produto_id)).execute()
 
+NOME_DONO = "yago magalhaes"
+
+def _is_dono(nome):
+    return nome.strip().lower() == NOME_DONO
+
 def salvar_pedido(nome, itens, forma_pagamento):
     from datetime import datetime
     pago = 1 if forma_pagamento == "agora" else 0
     custos_db  = carregar_custos()
     estoque_db = carregar_estoque()
     data_agora = datetime.now().strftime("%d/%m/%Y %H:%M")
+    origem     = "dono" if _is_dono(nome) else "site"
     for item in itens:
         total      = item["quantidade"] * item["preco"]
         custo_unit = custos_db.get(item["id"], 0.0)
@@ -282,7 +288,7 @@ def salvar_pedido(nome, itens, forma_pagamento):
             "pago":            int(pago),
             "custo_unitario":  float(custo_unit),
             "data_venda":      data_agora,
-            "origem":          "site",
+            "origem":          origem,
             "observacao":      "",
         }).execute()
         if item["id"] in estoque_db:
@@ -305,7 +311,7 @@ def salvar_venda_manual(cliente_nome, produto_nome, produto_id,
         "pago":            int(pago),
         "custo_unitario":  float(custo_unitario),
         "data_venda":      data_venda,
-        "origem":          "manual",
+        "origem":          "dono" if _is_dono(cliente_nome) else "manual",
         "observacao":      observacao,
         "telefone":        telefone.strip() if telefone else "",
     }).execute()
@@ -1537,12 +1543,13 @@ elif pagina == "Admin":
         df = carregar_vendas()
 
         # MÉTRICAS
-        df_pagos       = df[df["pago"] == 1] if not df.empty and "pago" in df.columns else df
+        _mask_dono     = df["origem"] == "dono" if not df.empty and "origem" in df.columns else pd.Series(False, index=df.index)
+        df_pagos       = df[(df["pago"] == 1) & ~_mask_dono] if not df.empty and "pago" in df.columns else df
         faturamento    = df_pagos["valor_total"].sum() if not df_pagos.empty else 0
-        a_receber_top  = df[df["pago"] == 0]["valor_total"].sum() if not df.empty and "pago" in df.columns else 0
+        a_receber_top  = df[(df["pago"] == 0) & ~_mask_dono]["valor_total"].sum() if not df.empty and "pago" in df.columns else 0
         itens_vendidos = int(df["quantidade"].sum()) if not df.empty else 0
-        num_clientes   = int(df["cliente_nome"].nunique()) if not df.empty else 0
-        num_pedidos    = len(df) if not df.empty else 0
+        num_clientes   = int(df[~_mask_dono]["cliente_nome"].nunique()) if not df.empty else 0
+        num_pedidos    = len(df[~_mask_dono]) if not df.empty else 0
 
         st.markdown(
             '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">'
@@ -1614,11 +1621,12 @@ elif pagina == "Admin":
                     df_mes      = df_v[df_v["_periodo"] == periodo_sel]
 
                     # ── Métricas do mês ──
-                    df_mes_pago = df_mes[df_mes["pago"] == 1]
-                    rec_mes  = df_mes_pago["valor_total"].sum()
-                    ped_mes  = len(df_mes)
-                    cli_mes  = df_mes["cliente_nome"].nunique()
-                    a_rec_mes = df_mes[df_mes["pago"] == 0]["valor_total"].sum()
+                    _mes_dono   = df_mes["origem"] == "dono" if "origem" in df_mes.columns else pd.Series(False, index=df_mes.index)
+                    df_mes_pago = df_mes[(df_mes["pago"] == 1) & ~_mes_dono]
+                    rec_mes   = df_mes_pago["valor_total"].sum()
+                    ped_mes   = len(df_mes[~_mes_dono])
+                    cli_mes   = df_mes[~_mes_dono]["cliente_nome"].nunique()
+                    a_rec_mes = df_mes[(df_mes["pago"] == 0) & ~_mes_dono]["valor_total"].sum()
 
                     cm1, cm2, cm3, cm4 = st.columns(4)
                     cm1.metric("Receita do mês",   brl(rec_mes))
@@ -1662,11 +1670,15 @@ elif pagina == "Admin":
                 if df.empty:
                     st.info("Nenhum pedido registrado ainda.")
                 else:
-                    df_pago   = df[df["pago"] == 1]
-                    df_pendente = df[df["pago"] == 0]
+                    _fin_dono   = df["origem"] == "dono" if "origem" in df.columns else pd.Series(False, index=df.index)
+                    df_pago     = df[(df["pago"] == 1) & ~_fin_dono]
+                    df_dono     = df[_fin_dono]  # pedidos do dono = custo/prejuízo
+                    df_pendente = df[(df["pago"] == 0) & ~_fin_dono]
 
                     receita       = df_pago["valor_total"].sum()
-                    custo_total   = (df_pago["custo_unitario"] * df_pago["quantidade"]).sum() if "custo_unitario" in df_pago.columns and not df_pago.empty else 0
+                    custo_prod    = (df_pago["custo_unitario"] * df_pago["quantidade"]).sum() if "custo_unitario" in df_pago.columns and not df_pago.empty else 0
+                    custo_dono    = df_dono["valor_total"].sum() if not df_dono.empty else 0
+                    custo_total   = custo_prod + custo_dono
                     lucro         = receita - custo_total
                     margem        = (lucro / receita * 100) if receita > 0 else 0
                     a_receber     = df_pendente["valor_total"].sum()
